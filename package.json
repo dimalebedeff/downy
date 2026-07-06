@@ -1,0 +1,21 @@
+{
+  "name": "downy",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Детект и скачивание видео/аудио со страниц браузера (аналог Video DownloadHelper)",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "coapp:install": "node coapp/install.mjs",
+    "coapp:fetch-bins": "node coapp/fetch-bins.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.2.2",
+    "@types/node": "^26.1.0",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

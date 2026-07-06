@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>Downy</title>
+</head>
+<body>
+  <header>
+    <h1>Downy</h1>
+    <span id="coapp-status" class="status status-unknown" title="Проверяю CoApp…">CoApp</span>
+  </header>
+
+  <section id="media-section">
+    <div id="empty" hidden>На этой вкладке медиа не найдено</div>
+    <ul id="media-list"></ul>
+  </section>
+
+  <section id="jobs-section" hidden>
+    <h2>Загрузки</h2>
+    <ul id="jobs-list"></ul>
+    <button id="clear-jobs" class="link-btn">Очистить завершённые</button>
+  </section>
+
+  <footer>
+    <button id="ytdlp-page">Скачать страницу через yt-dlp</button>
+    <details>
+      <summary>Настройки</summary>
+      <label class="field">
+        Папка загрузок CoApp
+        <input id="out-dir" placeholder="по умолчанию: Downloads\downy">
+      </label>
+    </details>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
