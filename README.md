@@ -26,6 +26,17 @@ npm run coapp:install    # регистрирует CoApp в реестре (Chr
 
 В попапе статус «CoApp» должен быть зелёным. Файлы сохраняются в `Downloads\downy` (папка меняется в настройках попапа).
 
+## Установка на другом компьютере
+
+На новой машине (Windows) нужно повторить те же шаги:
+
+1. Установить [Node.js LTS](https://nodejs.org) (или `winget install OpenJS.NodeJS.LTS`).
+2. Склонировать репозиторий: `git clone https://github.com/TotallenKrieg/downy.git` — репозиторий приватный, поэтому нужно войти в свой GitHub-аккаунт (проще всего через `winget install GitHub.cli` → `gh auth login` → `gh repo clone TotallenKrieg/downy`).
+3. В папке проекта: `npm install && npm run build && npm run coapp:fetch-bins && npm run coapp:install`.
+4. Загрузить `extension/dist` как распакованное расширение (см. выше) и перезапустить браузер.
+
+ID расширения одинаковый на всех машинах (задан полем `key` в манифесте), поэтому связка с CoApp работает без донастройки. Бинарники ffmpeg/yt-dlp в git не хранятся — их всегда докачивает `coapp:fetch-bins`.
+
 ## Архитектура
 
 ```

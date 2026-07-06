@@ -11,12 +11,19 @@ const NATIVE_HOST = 'com.downy.coapp';
 const tabMedia = new Map<number, Map<string, MediaItem>>();
 // URL дочерних плейлистов известных мастеров — их не показываем отдельно
 const tabVariantUrls = new Map<number, Set<string>>();
+// Обложка страницы (og:image) — превью-фолбэк для медиа, найденного по сети
+const tabPageThumb = new Map<number, string>();
 const jobs = new Map<string, JobInfo>();
 const inflightHls = new Set<string>();
 
 // Service worker может быть выгружен в любой момент — состояние живёт в storage.session
 const restored: Promise<void> = (async () => {
-  const data = await chrome.storage.session.get(['tabMedia', 'jobs', 'tabVariantUrls']);
+  const data = await chrome.storage.session.get(['tabMedia', 'jobs', 'tabVariantUrls', 'tabPageThumb']);
+  if (data.tabPageThumb) {
+    for (const [tabId, thumb] of Object.entries(data.tabPageThumb as Record<string, string>)) {
+      tabPageThumb.set(Number(tabId), thumb);
+    }
+  }
   if (data.tabMedia) {
     for (const [tabId, items] of Object.entries(data.tabMedia as Record<string, Record<string, MediaItem>>)) {
       tabMedia.set(Number(tabId), new Map(Object.entries(items)));
@@ -43,7 +50,12 @@ function persist(): void {
     for (const [tabId, items] of tabMedia) tm[tabId] = Object.fromEntries(items);
     const tv: Record<string, string[]> = {};
     for (const [tabId, urls] of tabVariantUrls) tv[tabId] = [...urls];
-    void chrome.storage.session.set({ tabMedia: tm, tabVariantUrls: tv, jobs: Object.fromEntries(jobs) });
+    void chrome.storage.session.set({
+      tabMedia: tm,
+      tabVariantUrls: tv,
+      tabPageThumb: Object.fromEntries(tabPageThumb),
+      jobs: Object.fromEntries(jobs),
+    });
   }, 300);
 }
 
@@ -64,6 +76,7 @@ function updateBadge(tabId: number): void {
 function clearTab(tabId: number): void {
   tabMedia.delete(tabId);
   tabVariantUrls.delete(tabId);
+  tabPageThumb.delete(tabId);
   updateBadge(tabId);
   persist();
 }
@@ -84,6 +97,7 @@ function upsertItem(item: MediaItem): void {
     if (item.size && !existing.size) existing.size = item.size;
     if (item.contentType && !existing.contentType) existing.contentType = item.contentType;
     if (item.pageTitle && !existing.pageTitle) existing.pageTitle = item.pageTitle;
+    if (item.thumb && !existing.thumb) existing.thumb = item.thumb;
     persist();
     return;
   }
@@ -92,10 +106,17 @@ function upsertItem(item: MediaItem): void {
   persist();
 }
 
-async function addDirect(tabId: number, url: string, contentType?: string, size?: number, pageTitle?: string): Promise<void> {
+async function addDirect(
+  tabId: number,
+  url: string,
+  contentType?: string,
+  size?: number,
+  pageTitle?: string,
+  thumb?: string,
+): Promise<void> {
   await restored;
   if (getTabItems(tabId).has(url)) {
-    upsertItem({ url, kind: 'direct', tabId, foundAt: Date.now(), contentType, size });
+    upsertItem({ url, kind: 'direct', tabId, foundAt: Date.now(), contentType, size, thumb });
     return;
   }
   const info = await pageInfo(tabId);
@@ -106,12 +127,13 @@ async function addDirect(tabId: number, url: string, contentType?: string, size?
     foundAt: Date.now(),
     contentType,
     size,
+    thumb,
     pageUrl: info.pageUrl,
     pageTitle: pageTitle ?? info.pageTitle,
   });
 }
 
-async function addHls(tabId: number, url: string, pageTitle?: string): Promise<void> {
+async function addHls(tabId: number, url: string, pageTitle?: string, thumb?: string): Promise<void> {
   await restored;
   if (tabVariantUrls.get(tabId)?.has(url)) return;
   if (getTabItems(tabId).has(url)) return;
@@ -129,6 +151,7 @@ async function addHls(tabId: number, url: string, pageTitle?: string): Promise<v
       kind: 'hls',
       tabId,
       foundAt: Date.now(),
+      thumb,
       pageUrl: info.pageUrl,
       pageTitle: pageTitle ?? info.pageTitle,
     };
@@ -205,6 +228,8 @@ function getCoAppPort(): chrome.runtime.Port {
     job.state = msg.state;
     job.progress = msg.progress;
     job.message = msg.message;
+    if (msg.bytes != null) job.bytes = msg.bytes;
+    if (msg.totalBytes != null) job.totalBytes = msg.totalBytes;
     if (msg.outFile) job.outFile = msg.outFile;
     persist();
     broadcastJobs();
@@ -328,19 +353,31 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         const tabId = sender.tab?.id;
         if (tabId == null || tabId < 0) break;
         const pageTitle = msg.pageTitle as string | undefined;
-        for (const url of msg.urls as string[]) {
-          const kind = classifyMedia(url);
-          if (kind === 'hls') void addHls(tabId, url, pageTitle);
-          else if (kind === 'direct') void addDirect(tabId, url, undefined, undefined, pageTitle);
+        const pageThumb = msg.pageThumb as string | undefined;
+        if (pageThumb) {
+          tabPageThumb.set(tabId, pageThumb);
+          persist();
+        }
+        for (const entry of (msg.media ?? []) as { url: string; thumb?: string }[]) {
+          const kind = classifyMedia(entry.url);
+          if (kind === 'hls') void addHls(tabId, entry.url, pageTitle, entry.thumb);
+          else if (kind === 'direct') void addDirect(tabId, entry.url, undefined, undefined, pageTitle, entry.thumb);
+          else if (entry.thumb) {
+            // Медиа уже могло быть найдено по сети — хотя бы дольём превью
+            const existing = getTabItems(tabId).get(entry.url);
+            if (existing && !existing.thumb) {
+              existing.thumb = entry.thumb;
+              persist();
+            }
+          }
         }
         sendResponse({ ok: true });
         break;
       }
       case 'get-media': {
-        const items = [...(tabMedia.get(msg.tabId as number)?.values() ?? [])].sort(
-          (a, b) => a.foundAt - b.foundAt,
-        );
-        sendResponse({ items, jobs: [...jobs.values()] });
+        const tabId = msg.tabId as number;
+        const items = [...(tabMedia.get(tabId)?.values() ?? [])].sort((a, b) => a.foundAt - b.foundAt);
+        sendResponse({ items, jobs: [...jobs.values()], pageThumb: tabPageThumb.get(tabId) });
         break;
       }
       case 'download-direct': {

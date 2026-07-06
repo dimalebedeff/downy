@@ -10,6 +10,7 @@ const coappStatusEl = $<HTMLSpanElement>('#coapp-status');
 const outDirInput = $<HTMLInputElement>('#out-dir');
 
 let activeTab: chrome.tabs.Tab | undefined;
+let pageThumb: string | undefined;
 
 function fmtSize(bytes?: number): string {
   if (!bytes) return '';
@@ -43,6 +44,22 @@ function renderMedia(items: MediaItem[]): void {
   for (const item of items) {
     const li = document.createElement('li');
     li.className = 'item';
+
+    const thumbSrc = item.thumb ?? pageThumb;
+    const thumbBox = document.createElement('div');
+    thumbBox.className = 'thumb';
+    if (thumbSrc) {
+      const img = document.createElement('img');
+      img.src = thumbSrc;
+      img.alt = '';
+      img.addEventListener('error', () => img.remove());
+      thumbBox.append(img);
+    } else {
+      thumbBox.textContent = item.kind === 'hls' || item.contentType?.startsWith('video') ? '🎬' : '🎵';
+    }
+
+    const body = document.createElement('div');
+    body.className = 'item-body';
 
     const row1 = document.createElement('div');
     row1.className = 'row1';
@@ -84,7 +101,8 @@ function renderMedia(items: MediaItem[]): void {
     btn.addEventListener('click', () => void download(item, select, btn));
     row2.append(btn);
 
-    li.append(row1, row2);
+    body.append(row1, row2);
+    li.append(thumbBox, body);
     mediaList.append(li);
   }
 }
@@ -121,12 +139,18 @@ function renderJobs(jobs: JobInfo[]): void {
     title.title = job.outFile ?? job.label;
     const state = document.createElement('span');
     state.className = `job-state ${job.state}`;
-    state.textContent =
-      job.state === 'done' ? 'готово'
-      : job.state === 'error' ? 'ошибка'
-      : job.state === 'canceled' ? 'отменено'
-      : job.progress != null ? `${Math.round(job.progress * 100)}%`
-      : 'идёт…';
+    if (job.state === 'done') {
+      state.textContent = job.bytes ? `готово · ${fmtSize(job.bytes)}` : 'готово';
+    } else if (job.state === 'error') {
+      state.textContent = 'ошибка';
+    } else if (job.state === 'canceled') {
+      state.textContent = 'отменено';
+    } else {
+      const parts: string[] = [];
+      if (job.bytes) parts.push(job.totalBytes ? `${fmtSize(job.bytes)} / ${fmtSize(job.totalBytes)}` : fmtSize(job.bytes));
+      if (job.progress != null) parts.push(`${Math.round(job.progress * 100)}%`);
+      state.textContent = parts.join(' · ') || 'идёт…';
+    }
     row.append(title, state);
 
     if (job.state === 'running' || job.state === 'starting') {
@@ -171,6 +195,7 @@ function showError(text: string): void {
 async function refresh(): Promise<void> {
   if (activeTab?.id == null) return;
   const res = await chrome.runtime.sendMessage({ type: 'get-media', tabId: activeTab.id });
+  pageThumb = res?.pageThumb;
   renderMedia(res?.items ?? []);
   renderJobs(res?.jobs ?? []);
 }

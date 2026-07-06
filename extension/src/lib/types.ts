@@ -15,6 +15,8 @@ export interface MediaItem {
   variants?: HlsVariant[];
   /** Для HLS-медиаплейлиста — длительность в секундах */
   durationSec?: number;
+  /** Превью: poster тега video или кадр (data URL) */
+  thumb?: string;
 }
 
 export interface JobInfo {
@@ -22,6 +24,8 @@ export interface JobInfo {
   label: string;
   state: 'starting' | 'running' | 'done' | 'error' | 'canceled';
   progress: number | null;
+  bytes?: number;
+  totalBytes?: number;
   message?: string;
   outFile?: string;
 }

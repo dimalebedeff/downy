@@ -112,18 +112,26 @@ function startHls(req: HlsJobRequest): void {
     }
   });
 
+  let writtenBytes = 0;
   child.stdout?.on('data', (d: Buffer) => {
-    const m = d.toString().match(/out_time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
-    if (!m || !durationSec) return;
-    const done = Number(m[1]) * 3600 + Number(m[2]) * 60 + parseFloat(m[3]);
+    const s = d.toString();
+    const sizeMatch = s.match(/total_size=(\d+)/);
+    if (sizeMatch) writtenBytes = Number(sizeMatch[1]);
+    const timeMatch = s.match(/out_time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
     const now = Date.now();
     if (now - lastSent < 1000) return;
     lastSent = now;
+    let progress: number | null = null;
+    if (timeMatch && durationSec) {
+      const done = Number(timeMatch[1]) * 3600 + Number(timeMatch[2]) * 60 + parseFloat(timeMatch[3]);
+      progress = Math.min(0.999, done / durationSec);
+    }
     emit({
       type: 'job',
       jobId: req.jobId,
       state: 'running',
-      progress: Math.min(0.999, done / durationSec),
+      progress,
+      bytes: writtenBytes || undefined,
     });
   });
 
@@ -166,12 +174,26 @@ function startYtdlp(req: YtdlpJobRequest): void {
     const s = d.toString();
     const dest = s.match(/\[download\] Destination: (.+)/) ?? s.match(/\[Merger\] Merging formats into "(.+)"/);
     if (dest) outFile = dest[1].trim();
-    const pct = s.match(/\[download\]\s+([\d.]+)%/);
+    // Пример строки: "[download]  42.5% of   12.34MiB at  1.23MiB/s ETA 00:05"
+    const pct = s.match(/\[download\]\s+([\d.]+)%(?:\s+of\s+~?\s*([\d.]+)(B|KiB|MiB|GiB|TiB))?/);
     if (pct) {
       const now = Date.now();
       if (now - lastSent >= 1000) {
         lastSent = now;
-        emit({ type: 'job', jobId: req.jobId, state: 'running', progress: Math.min(0.999, parseFloat(pct[1]) / 100) });
+        const progress = Math.min(0.999, parseFloat(pct[1]) / 100);
+        let totalBytes: number | undefined;
+        if (pct[2]) {
+          const mult = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 }[pct[3] as 'B' | 'KiB' | 'MiB' | 'GiB' | 'TiB'];
+          totalBytes = Math.round(parseFloat(pct[2]) * mult);
+        }
+        emit({
+          type: 'job',
+          jobId: req.jobId,
+          state: 'running',
+          progress,
+          totalBytes,
+          bytes: totalBytes ? Math.round(totalBytes * progress) : undefined,
+        });
       }
     }
   });

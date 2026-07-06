@@ -48,6 +48,10 @@ export interface JobEvent {
   state: JobState;
   /** 0..1 или null, если прогресс неизвестен */
   progress: number | null;
+  /** Сколько байт уже скачано/записано */
+  bytes?: number;
+  /** Полный размер в байтах, если известен */
+  totalBytes?: number;
   message?: string;
   outFile?: string;
 }
