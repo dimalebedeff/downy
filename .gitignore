@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coapp/bin/
+coapp/host-manifest*.json
+.claude/settings.local.json
+.scratch/
+*.log
