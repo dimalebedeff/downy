@@ -69,20 +69,12 @@ function getTabItems(tabId: number): Map<string, MediaItem> {
   return m;
 }
 
-function updateBadge(tabId: number): void {
-  const n = tabMedia.get(tabId)?.size ?? 0;
-  void chrome.action.setBadgeText({ tabId, text: n ? String(n) : '' });
-}
-
 function clearTab(tabId: number): void {
   tabMedia.delete(tabId);
   tabVariantUrls.delete(tabId);
   tabPageThumb.delete(tabId);
-  updateBadge(tabId);
   persist();
 }
-
-void chrome.action.setBadgeBackgroundColor({ color: '#e5484d' });
 
 // ---------- Детекция ----------
 
@@ -103,7 +95,6 @@ function upsertItem(item: MediaItem): void {
     return;
   }
   items.set(item.url, item);
-  updateBadge(item.tabId);
   persist();
 }
 
