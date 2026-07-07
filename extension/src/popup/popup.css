@@ -1,24 +1,29 @@
+/* Палитра: серый + фирменный жёлтый (как на иконке).
+   --accent — заливки (кнопки, прогресс), --accent-text — жёлтый для текста:
+   на светлом фоне берём затемнённый оттенок, иначе не читается. */
 :root {
   color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --accent: #2563eb;
-  --accent-fg: #ffffff;
-  --ok: #16a34a;
+  --bg: #fafafa;
+  --fg: #1c1d21;
+  --muted: #6e7176;
+  --border: #e0e1e4;
+  --accent: #f5c518;
+  --accent-fg: #1c1d21;
+  --accent-text: #94740a;
+  --ok: #94740a;
   --err: #dc2626;
-  --chip-bg: #eef2ff;
+  --chip-bg: #ececee;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #101114;
-    --fg: #f2f4f8;
-    --muted: #aab1bc;
-    --border: #2c3037;
-    --accent: #3b82f6;
-    --chip-bg: #20242c;
+    --bg: #17181c;
+    --fg: #f2f3f5;
+    --muted: #a6abb4;
+    --border: #2c2f35;
+    --accent-text: #f5c518;
+    --ok: #f5c518;
+    --chip-bg: #24272c;
   }
 }
 
@@ -92,7 +97,7 @@ ul { list-style: none; margin: 0; padding: 0; }
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--chip-bg);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .title {
   flex: 1;
@@ -116,7 +121,10 @@ select {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 3px 4px;
+  accent-color: var(--accent);
 }
+select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+select.streams { max-width: 96px; }
 
 button {
   font: inherit;
@@ -132,7 +140,7 @@ button:disabled { opacity: .5; cursor: default; }
 
 .link-btn {
   background: none;
-  color: var(--accent);
+  color: var(--accent-text);
   padding: 4px 0;
 }
 
@@ -151,7 +159,7 @@ button:disabled { opacity: .5; cursor: default; }
   font-size: 14px;
   line-height: 1;
 }
-progress { width: 100%; height: 6px; margin-top: 4px; }
+progress { width: 100%; height: 6px; margin-top: 4px; accent-color: var(--accent); }
 .job-msg { color: var(--err); font-size: 11px; margin-top: 2px; word-break: break-all; }
 
 footer {
@@ -162,7 +170,9 @@ footer {
   gap: 8px;
 }
 
-#ytdlp-page { width: 100%; }
+.ytdlp-row { display: flex; gap: 6px; }
+#ytdlp-page { flex: 1; }
+.ytdlp-row select { flex: none; }
 
 .field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; color: var(--muted); font-size: 12px; }
 .field-row { display: flex; gap: 6px; }
