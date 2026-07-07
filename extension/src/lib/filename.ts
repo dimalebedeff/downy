@@ -1,3 +1,5 @@
+import type { StreamSelection } from '../../../shared/protocol';
+
 const EXT_BY_TYPE: Record<string, string> = {
   'video/mp4': 'mp4',
   'video/webm': 'webm',
@@ -52,8 +54,6 @@ export interface FilenameSource {
   pageTitle?: string;
   contentType?: string;
 }
-
-import type { StreamSelection } from '../../../shared/protocol';
 
 const AUDIO_EXTS = new Set(['mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'wav', 'flac']);
 

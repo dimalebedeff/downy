@@ -38,6 +38,12 @@ const restored: Promise<void> = (async () => {
   }
   if (data.jobs) {
     for (const [id, job] of Object.entries(data.jobs as Record<string, JobInfo>)) {
+      // Рестарт SW закрыл порт, CoApp вместе с загрузками умер —
+      // иначе job навсегда останется «running» в попапе
+      if (job.state === 'running' || job.state === 'starting') {
+        job.state = 'error';
+        job.message = 'Прервано перезапуском браузера';
+      }
       jobs.set(id, job);
     }
   }
@@ -441,6 +447,8 @@ interface UpdateStatus {
   available: boolean;
   tag?: string;
   current: string;
+  /** Обновление уже запущено (попап могли закрыть и открыть заново) */
+  updating: boolean;
 }
 
 async function checkUpdate(): Promise<UpdateStatus> {
@@ -462,7 +470,7 @@ async function checkUpdate(): Promise<UpdateStatus> {
     void chrome.storage.local.set({ updateCheck: cached });
   }
   // «Доступно» вычисляем каждый раз: после обновления та же запись кеша уже не новее
-  return { available: isNewerVersion(current, cached.tag), tag: cached.tag, current };
+  return { available: isNewerVersion(current, cached.tag), tag: cached.tag, current, updating: updateInProgress };
 }
 
 function hasActiveJobs(): boolean {

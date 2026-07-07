@@ -156,13 +156,17 @@ function makeYtdlpStdoutHandler(jobId: string, onOutFile?: (file: string) => voi
   };
 }
 
-/** Убирает сам файл и все хвосты yt-dlp (.part, .part-FragN, .ytdl) */
+/** Убирает сам файл и хвосты yt-dlp (.part, .part-FragN, .ytdl) */
 function cleanupPartials(outFile: string): void {
   const dir = path.dirname(outFile);
   const base = path.basename(outFile);
   try {
     for (const f of fs.readdirSync(dir)) {
-      if (f === base || f.startsWith(`${base}.`)) fs.rmSync(path.join(dir, f), { force: true });
+      // Только известные суффиксы yt-dlp: по голому префиксу можно зацепить
+      // чужой файл вида «имя.mp4.bak»
+      if (f === base || f.startsWith(`${base}.part`) || f === `${base}.ytdl`) {
+        fs.rmSync(path.join(dir, f), { force: true });
+      }
     }
   } catch {
     // папку могли удалить — не мешаем завершению джоба
@@ -244,6 +248,18 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelec
 
 /** Копирует из скачанного файла только выбранную дорожку (без перекодирования). */
 function stripTracks(jobId: string, srcFile: string, outFile: string, streams: 'video' | 'audio'): void {
+  // Отмена могла прийти в зазор между выходом yt-dlp и этим вызовом —
+  // тогда она осела в уже завершившемся джобе
+  if (jobs.get(jobId)?.canceled) {
+    jobs.delete(jobId);
+    try {
+      fs.rmSync(srcFile, { force: true });
+    } catch {
+      // временный файл не критичен
+    }
+    emit({ type: 'job', jobId, state: 'canceled', progress: null });
+    return;
+  }
   const args = ['-y', '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', srcFile];
   args.push('-map', streams === 'video' ? '0:v' : '0:a', '-c', 'copy');
   if (/\.(mp4|m4a|mov)$/i.test(outFile)) args.push('-movflags', '+faststart');

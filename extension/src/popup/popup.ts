@@ -181,8 +181,15 @@ async function initUpdater(): Promise<void> {
   const status = await chrome.runtime.sendMessage({ type: 'check-update' });
   if (!status?.available) return;
   updateBtn.hidden = false;
-  updateBtn.textContent = `Обновить Downy до ${status.tag}`;
-  syncUpdateBtn();
+  if (status.updating) {
+    // Обновление запустили из прошлого попапа — показываем процесс, а не кнопку
+    updating = true;
+    updateBtn.disabled = true;
+    updateBtn.textContent = 'Устанавливаю…';
+  } else {
+    updateBtn.textContent = `Обновить Downy до ${status.tag}`;
+    syncUpdateBtn();
+  }
   updateBtn.addEventListener('click', async () => {
     updating = true;
     updateBtn.disabled = true;
