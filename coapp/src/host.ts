@@ -45,6 +45,16 @@ function binWorks(bin: string, versionArg: string): boolean {
   }
 }
 
+let ytdlpOkCache: boolean | null = null;
+function ytdlpWorks(): boolean {
+  if (ytdlpOkCache == null) ytdlpOkCache = binWorks(ytdlpPath, '--version');
+  return ytdlpOkCache;
+}
+
+// Сегменты HLS качаем параллельно: последовательная загрузка упирается в
+// задержку сети и per-connection-троттлинг CDN (ВК и т.п.)
+const HLS_CONCURRENCY = '8';
+
 const defaultOutDir = path.join(os.homedir(), 'Downloads', 'downy');
 
 function resolveOutDir(requested?: string): string {
@@ -105,6 +115,53 @@ function jobDone(jobId: string, code: number | null, canceled: boolean, outFile:
   }
 }
 
+/**
+ * Парсер stdout yt-dlp: строки прогресса вида
+ * "[download]  42.5% of   12.34MiB at  1.23MiB/s ETA 00:05" и путь итогового файла.
+ */
+function makeYtdlpStdoutHandler(jobId: string, onOutFile?: (file: string) => void): (d: Buffer) => void {
+  let lastSent = 0;
+  return (d: Buffer) => {
+    const s = d.toString();
+    if (onOutFile) {
+      const dest = s.match(/\[download\] Destination: (.+)/) ?? s.match(/\[Merger\] Merging formats into "(.+)"/);
+      if (dest) onOutFile(dest[1].trim());
+    }
+    const pct = s.match(/\[download\]\s+([\d.]+)%(?:\s+of\s+~?\s*([\d.]+)(B|KiB|MiB|GiB|TiB))?/);
+    if (!pct) return;
+    const now = Date.now();
+    if (now - lastSent < 1000) return;
+    lastSent = now;
+    const progress = Math.min(0.999, parseFloat(pct[1]) / 100);
+    let totalBytes: number | undefined;
+    if (pct[2]) {
+      const mult = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 }[pct[3] as 'B' | 'KiB' | 'MiB' | 'GiB' | 'TiB'];
+      totalBytes = Math.round(parseFloat(pct[2]) * mult);
+    }
+    emit({
+      type: 'job',
+      jobId,
+      state: 'running',
+      progress,
+      totalBytes,
+      bytes: totalBytes ? Math.round(totalBytes * progress) : undefined,
+    });
+  };
+}
+
+/** Убирает сам файл и все хвосты yt-dlp (.part, .part-FragN, .ytdl) */
+function cleanupPartials(outFile: string): void {
+  const dir = path.dirname(outFile);
+  const base = path.basename(outFile);
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (f === base || f.startsWith(`${base}.`)) fs.rmSync(path.join(dir, f), { force: true });
+    }
+  } catch {
+    // папку могли удалить — не мешаем завершению джоба
+  }
+}
+
 function startHls(req: HlsJobRequest): void {
   let outFile: string;
   try {
@@ -116,6 +173,63 @@ function startHls(req: HlsJobRequest): void {
     return;
   }
 
+  // yt-dlp качает сегменты параллельно и обходит троттлинг на одно соединение;
+  // ffmpeg (последовательный) — только фолбэк
+  if (ytdlpWorks()) startHlsYtdlp(req, outFile);
+  else startHlsFfmpeg(req, outFile);
+}
+
+function startHlsYtdlp(req: HlsJobRequest, outFile: string): void {
+  const args = ['--newline', '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-o', outFile];
+  if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
+  if (req.headers?.userAgent) args.push('--user-agent', req.headers.userAgent);
+  if (req.headers?.referer) args.push('--referer', req.headers.referer);
+  args.push(req.url);
+
+  log('yt-dlp hls start', req.jobId, req.url, '->', outFile);
+  const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const job = processJob(child);
+  jobs.set(req.jobId, job);
+  emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
+
+  let errTail = '';
+  child.stdout?.on('data', makeYtdlpStdoutHandler(req.jobId));
+  child.stderr?.on('data', (d: Buffer) => {
+    errTail = (errTail + d.toString()).slice(-2000);
+  });
+
+  // При ошибке спавна срабатывают и 'error', и 'close' — фолбэк должен быть один
+  let settled = false;
+  const fallback = (reason: string): void => {
+    if (settled) return;
+    settled = true;
+    log('yt-dlp hls fallback to ffmpeg', req.jobId, reason.slice(-300));
+    jobs.delete(req.jobId);
+    cleanupPartials(outFile);
+    startHlsFfmpeg(req, outFile);
+  };
+
+  child.on('error', (e) => {
+    fallback(`spawn error: ${e.message}`);
+  });
+
+  child.on('close', (code) => {
+    if (settled) return;
+    settled = true;
+    log('yt-dlp hls exit', req.jobId, code, 'canceled:', job.canceled);
+    if (job.canceled) {
+      jobs.delete(req.jobId);
+      cleanupPartials(outFile);
+      emit({ type: 'job', jobId: req.jobId, state: 'canceled', progress: null });
+    } else if (code === 0) {
+      jobDone(req.jobId, code, false, outFile, errTail);
+    } else {
+      fallback(errTail);
+    }
+  });
+}
+
+function startHlsFfmpeg(req: HlsJobRequest, outFile: string): void {
   const args = ['-y', '-nostdin', '-hide_banner'];
   if (req.headers?.userAgent) args.push('-user_agent', req.headers.userAgent);
   if (req.headers?.referer) args.push('-referer', req.headers.referer);
@@ -250,7 +364,7 @@ function startYtdlp(req: YtdlpJobRequest): void {
     return;
   }
 
-  const args = ['--newline', '--no-playlist', '-P', outDir, '-o', '%(title).120s [%(id)s].%(ext)s'];
+  const args = ['--newline', '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-P', outDir, '-o', '%(title).120s [%(id)s].%(ext)s'];
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
   args.push(req.pageUrl);
 
@@ -262,35 +376,10 @@ function startYtdlp(req: YtdlpJobRequest): void {
 
   let outFile = '';
   let errTail = '';
-  let lastSent = 0;
 
-  child.stdout?.on('data', (d: Buffer) => {
-    const s = d.toString();
-    const dest = s.match(/\[download\] Destination: (.+)/) ?? s.match(/\[Merger\] Merging formats into "(.+)"/);
-    if (dest) outFile = dest[1].trim();
-    // Пример строки: "[download]  42.5% of   12.34MiB at  1.23MiB/s ETA 00:05"
-    const pct = s.match(/\[download\]\s+([\d.]+)%(?:\s+of\s+~?\s*([\d.]+)(B|KiB|MiB|GiB|TiB))?/);
-    if (pct) {
-      const now = Date.now();
-      if (now - lastSent >= 1000) {
-        lastSent = now;
-        const progress = Math.min(0.999, parseFloat(pct[1]) / 100);
-        let totalBytes: number | undefined;
-        if (pct[2]) {
-          const mult = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 }[pct[3] as 'B' | 'KiB' | 'MiB' | 'GiB' | 'TiB'];
-          totalBytes = Math.round(parseFloat(pct[2]) * mult);
-        }
-        emit({
-          type: 'job',
-          jobId: req.jobId,
-          state: 'running',
-          progress,
-          totalBytes,
-          bytes: totalBytes ? Math.round(totalBytes * progress) : undefined,
-        });
-      }
-    }
-  });
+  child.stdout?.on('data', makeYtdlpStdoutHandler(req.jobId, (f) => {
+    outFile = f;
+  }));
 
   child.stderr?.on('data', (d: Buffer) => {
     errTail = (errTail + d.toString()).slice(-2000);
