@@ -2,6 +2,7 @@ node_modules/
 dist/
 coapp/bin/
 coapp/host-manifest*.json
+coapp/run-host.bat
 .claude/settings.local.json
 .scratch/
 *.log

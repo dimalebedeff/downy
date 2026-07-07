@@ -1,0 +1,7 @@
+# cmd надёжно исполняет батники только с CRLF (особенно goto/labels)
+*.bat text eol=crlf
+
+# Служебные файлы не нужны в архивах релизов (Source code zip/tar)
+CLAUDE.md export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore
