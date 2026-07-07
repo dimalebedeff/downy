@@ -416,6 +416,13 @@ function pickDir(req: PickDirRequest): void {
   });
 }
 
+function showInFolder(target: string): void {
+  log('show_in_folder', target);
+  // Файл могли переместить/удалить — тогда открываем хотя бы папку
+  const args = fs.existsSync(target) ? [`/select,${target}`] : [path.dirname(target)];
+  spawn('explorer.exe', args, { detached: true, stdio: 'ignore' }).unref();
+}
+
 function cancel(jobId: string): void {
   const job = jobs.get(jobId);
   if (!job) return;
@@ -444,6 +451,9 @@ readMessages((raw) => {
       break;
     case 'thumb':
       enqueueThumb(msg);
+      break;
+    case 'show_in_folder':
+      showInFolder(msg.path);
       break;
     case 'download_hls':
       startHls(msg);

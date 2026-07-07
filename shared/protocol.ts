@@ -54,6 +54,12 @@ export interface PickDirRequest {
   current?: string;
 }
 
+/** Открыть Проводник с выделенным скачанным файлом */
+export interface ShowInFolderRequest {
+  type: 'show_in_folder';
+  path: string;
+}
+
 /** Вытащить кадр-превью из видео/потока */
 export interface ThumbRequest {
   type: 'thumb';
@@ -72,7 +78,8 @@ export type CoAppRequest =
   | CancelRequest
   | PingRequest
   | PickDirRequest
-  | ThumbRequest;
+  | ThumbRequest
+  | ShowInFolderRequest;
 
 export interface PongEvent {
   type: 'pong';

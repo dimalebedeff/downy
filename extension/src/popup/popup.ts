@@ -143,6 +143,17 @@ function renderJobs(jobs: JobInfo[]): void {
     }
     row.append(title, state);
 
+    if (job.state === 'done' && job.outFile) {
+      const show = document.createElement('button');
+      show.className = 'link-btn show-btn';
+      show.textContent = 'в папке';
+      show.title = job.outFile;
+      show.addEventListener('click', () => {
+        void chrome.runtime.sendMessage({ type: 'show-in-folder', path: job.outFile });
+      });
+      row.append(show);
+    }
+
     if (job.state === 'running' || job.state === 'starting') {
       const cancel = document.createElement('button');
       cancel.className = 'cancel-btn';

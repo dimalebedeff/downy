@@ -142,6 +142,7 @@ button:disabled { opacity: .5; cursor: default; }
 .job-state { flex: none; font-size: 11px; color: var(--muted); }
 .job-state.done { color: var(--ok); }
 .job-state.error, .job-state.canceled { color: var(--err); }
+.show-btn { flex: none; font-size: 11px; padding: 0 2px; }
 .cancel-btn {
   flex: none;
   background: none;
