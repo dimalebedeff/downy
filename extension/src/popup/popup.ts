@@ -236,6 +236,7 @@ async function init(): Promise<void> {
     try {
       const res = await chrome.runtime.sendMessage({ type: 'pick-out-dir', current: outDirInput.value.trim() });
       if (res?.dir) outDirInput.value = res.dir;
+      else if (res?.ok === false) showError(res.error ?? 'Не удалось открыть диалог выбора папки');
     } finally {
       browseBtn.disabled = false;
     }

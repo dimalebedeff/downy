@@ -90,6 +90,15 @@ export interface PickDirEvent {
   dir: string | null;
 }
 
+/**
+ * Пустое событие «я жив». CoApp шлёт его, пока открыт диалог выбора папки:
+ * входящие сообщения сбрасывают таймер простоя MV3 service worker'а,
+ * иначе Chrome усыпит его и ответ диалога потеряется.
+ */
+export interface HeartbeatEvent {
+  type: 'heartbeat';
+}
+
 export type JobState = 'running' | 'done' | 'error' | 'canceled';
 
 export interface JobEvent {
@@ -113,4 +122,4 @@ export interface ThumbEvent {
   dataUrl: string | null;
 }
 
-export type CoAppEvent = PongEvent | JobEvent | PickDirEvent | ThumbEvent;
+export type CoAppEvent = PongEvent | JobEvent | PickDirEvent | ThumbEvent | HeartbeatEvent;

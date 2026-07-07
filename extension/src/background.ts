@@ -219,7 +219,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 let coappPort: chrome.runtime.Port | null = null;
 
 // Ожидающие ответы диалога выбора папки: reqId -> resolve
-const pendingPickDir = new Map<string, (dir: string | null) => void>();
+const pendingPickDir = new Map<string, (res: { dir: string | null; error?: string }) => void>();
 
 // Запрошенные у CoApp кадры-превью: reqId -> куда положить результат
 const pendingThumbs = new Map<string, { tabId: number; url: string }>();
@@ -233,9 +233,10 @@ function getCoAppPort(): chrome.runtime.Port {
     if (msg.type === 'pick_dir') {
       const resolve = pendingPickDir.get(msg.reqId);
       pendingPickDir.delete(msg.reqId);
-      resolve?.(msg.dir);
+      resolve?.({ dir: msg.dir });
       return;
     }
+    if (msg.type === 'heartbeat') return; // само получение сбрасывает таймер простоя SW
     if (msg.type === 'thumb') {
       const target = pendingThumbs.get(msg.reqId);
       pendingThumbs.delete(msg.reqId);
@@ -263,7 +264,7 @@ function getCoAppPort(): chrome.runtime.Port {
   port.onDisconnect.addListener(() => {
     const err = chrome.runtime.lastError?.message;
     coappPort = null;
-    for (const resolve of pendingPickDir.values()) resolve(null);
+    for (const resolve of pendingPickDir.values()) resolve({ dir: null, error: err ?? 'CoApp отключился' });
     pendingPickDir.clear();
     // Дадим шанс перезапросить кадры при следующем открытии попапа
     for (const { url } of pendingThumbs.values()) thumbTried.delete(url);
@@ -489,21 +490,23 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
       }
       case 'pick-out-dir': {
         const reqId = crypto.randomUUID();
-        const dir = await new Promise<string | null>((resolve) => {
+        const res = await new Promise<{ dir: string | null; error?: string }>((resolve) => {
           pendingPickDir.set(reqId, resolve);
           const sent = sendToCoApp({ type: 'pick_dir', reqId, current: msg.current as string | undefined });
           if (!sent.ok) {
             pendingPickDir.delete(reqId);
-            resolve(null);
+            resolve({ dir: null, error: sent.error ?? 'CoApp недоступен' });
           }
           // Страховка: если CoApp так и не ответил, не держим промис вечно
           setTimeout(() => {
-            if (pendingPickDir.delete(reqId)) resolve(null);
+            const resolveTimeout = pendingPickDir.get(reqId);
+            pendingPickDir.delete(reqId);
+            resolveTimeout?.({ dir: null, error: 'Диалог выбора папки не ответил' });
           }, 300_000);
         });
         // Сохраняем в фоне: выбор не потеряется, даже если попап уже закрыт
-        if (dir) await chrome.storage.local.set({ outDir: dir });
-        sendResponse({ ok: true, dir });
+        if (res.dir) await chrome.storage.local.set({ outDir: res.dir });
+        sendResponse(res.error ? { ok: false, error: res.error } : { ok: true, dir: res.dir });
         break;
       }
       default:

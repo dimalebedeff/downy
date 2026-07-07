@@ -393,18 +393,26 @@ function pickDir(req: PickDirRequest): void {
     windowsHide: true,
     env: { ...process.env, DOWNY_CURRENT_DIR: req.current ?? '' },
   });
+  // Пока диалог открыт, шлём heartbeat — иначе Chrome усыпит service worker
+  const heartbeat = setInterval(() => sendMessage({ type: 'heartbeat' }), 10_000);
   let out = '';
+  let finished = false;
+  const finish = (dir: string | null): void => {
+    if (finished) return;
+    finished = true;
+    clearInterval(heartbeat);
+    log('pick_dir result', dir ?? '(отмена)');
+    sendMessage({ type: 'pick_dir', reqId: req.reqId, dir });
+  };
   child.stdout?.on('data', (d: Buffer) => {
     out += d.toString('utf8');
   });
   child.on('error', (e) => {
     log('pick_dir spawn error', e.message);
-    sendMessage({ type: 'pick_dir', reqId: req.reqId, dir: null });
+    finish(null);
   });
   child.on('close', () => {
-    const dir = out.trim() || null;
-    log('pick_dir result', dir ?? '(отмена)');
-    sendMessage({ type: 'pick_dir', reqId: req.reqId, dir });
+    finish(out.trim() || null);
   });
 }
 
