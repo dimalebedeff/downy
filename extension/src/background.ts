@@ -1,4 +1,5 @@
 import { classifyMedia, isProbablyVideo } from './lib/media-detect';
+import { canonicalMediaUrl } from './lib/media-group';
 import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDuration } from './lib/m3u8';
 import { buildFilename } from './lib/filename';
 import type { JobInfo, MediaItem } from './lib/types';
@@ -200,7 +201,8 @@ chrome.webRequest.onHeadersReceived.addListener(
       const cl = header('content-length');
       if (cl) size = parseInt(cl, 10);
     }
-    void addDirect(details.tabId, details.url, contentType ?? undefined, size);
+    // Куски одного файла (?bytes=...) схлопываем в один элемент с полным URL
+    void addDirect(details.tabId, canonicalMediaUrl(details.url), contentType ?? undefined, size);
   },
   { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame', 'xmlhttprequest', 'media', 'object', 'other'] },
   ['responseHeaders'],
@@ -434,10 +436,10 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         for (const entry of (msg.media ?? []) as { url: string; thumb?: string }[]) {
           const kind = classifyMedia(entry.url);
           if (kind === 'hls') void addHls(tabId, entry.url, pageTitle, entry.thumb);
-          else if (kind === 'direct') void addDirect(tabId, entry.url, undefined, undefined, pageTitle, entry.thumb);
+          else if (kind === 'direct') void addDirect(tabId, canonicalMediaUrl(entry.url), undefined, undefined, pageTitle, entry.thumb);
           else if (entry.thumb) {
             // Медиа уже могло быть найдено по сети — хотя бы дольём превью
-            const existing = getTabItems(tabId).get(entry.url);
+            const existing = getTabItems(tabId).get(canonicalMediaUrl(entry.url));
             if (existing && !existing.thumb) {
               existing.thumb = entry.thumb;
               persist();

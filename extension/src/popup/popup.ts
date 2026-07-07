@@ -1,5 +1,6 @@
 import type { JobInfo, MediaItem } from '../lib/types';
 import { fmtSize, jobProgressView } from '../lib/progress';
+import { groupMediaItems } from '../lib/media-group';
 
 const $ = <T extends HTMLElement>(sel: string): T => document.querySelector(sel) as T;
 
@@ -33,8 +34,10 @@ function itemTitle(item: MediaItem): string {
 
 function renderMedia(items: MediaItem[]): void {
   mediaList.textContent = '';
-  emptyEl.hidden = items.length > 0;
-  for (const item of items) {
+  const groups = groupMediaItems(items);
+  emptyEl.hidden = groups.length > 0;
+  for (const group of groups) {
+    const item = group.primary;
     const li = document.createElement('li');
     li.className = 'item';
 
@@ -87,11 +90,27 @@ function renderMedia(items: MediaItem[]): void {
         select.append(opt);
       }
       row2.append(select);
+    } else if (item.kind === 'direct' && group.members.length > 1) {
+      // Варианты одного видео (разные качества) — один пункт с выбором
+      select = document.createElement('select');
+      for (const [i, m] of group.members.entries()) {
+        const opt = document.createElement('option');
+        opt.value = m.url;
+        opt.textContent = fmtSize(m.size) || m.contentType?.split('/')[1] || `вариант ${i + 1}`;
+        select.append(opt);
+      }
+      row2.append(select);
     }
 
     const btn = document.createElement('button');
     btn.textContent = 'Скачать';
-    btn.addEventListener('click', () => void download(item, select, btn));
+    btn.addEventListener('click', () => {
+      const chosen =
+        item.kind === 'direct' && select
+          ? group.members.find((m) => m.url === select!.value) ?? item
+          : item;
+      void download(chosen, item.kind === 'hls' ? select : null, btn);
+    });
     row2.append(btn);
 
     body.append(row1, row2);
@@ -148,8 +167,9 @@ function renderJobs(jobs: JobInfo[]): void {
       show.className = 'link-btn show-btn';
       show.textContent = 'в папке';
       show.title = job.outFile;
-      show.addEventListener('click', () => {
-        void chrome.runtime.sendMessage({ type: 'show-in-folder', path: job.outFile });
+      show.addEventListener('click', async () => {
+        const res = await chrome.runtime.sendMessage({ type: 'show-in-folder', path: job.outFile });
+        if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку');
       });
       row.append(show);
     }
