@@ -12,10 +12,12 @@ import type {
   PickDirRequest,
   StreamSelection,
   ThumbRequest,
+  UpdateRequest,
   YtdlpJobRequest,
 } from '../../shared/protocol';
 
-const VERSION = '0.2.0';
+// Держи в синхроне с extension/manifest.json и package.json
+const VERSION = '0.3.0';
 
 // __dirname указывает на coapp/dist после сборки
 const coappRoot = path.join(__dirname, '..');
@@ -55,6 +57,10 @@ function ytdlpWorks(): boolean {
 // Сегменты HLS качаем параллельно: последовательная загрузка упирается в
 // задержку сети и per-connection-троттлинг CDN (ВК и т.п.)
 const HLS_CONCURRENCY = '8';
+
+// Без --encoding yt-dlp пишет в stdout в кодировке консоли (cp1251) — кириллица
+// в путях превращается в кракозябры, и «показать в папке» не находит файл
+const YTDLP_COMMON_ARGS = ['--newline', '--encoding', 'utf-8'];
 
 const defaultOutDir = path.join(os.homedir(), 'Downloads', 'downy');
 
@@ -186,7 +192,7 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelec
   // Дорожку вырезаем после скачивания: в муксованном HLS yt-dlp не умеет
   // отдать только видео/аудио, а качать медленным ffmpeg напрямую — терять скорость
   const dlFile = streams === 'both' ? outFile : `${outFile}.dl.mp4`;
-  const args = ['--newline', '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-o', dlFile];
+  const args = [...YTDLP_COMMON_ARGS, '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-o', dlFile];
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
   if (req.headers?.userAgent) args.push('--user-agent', req.headers.userAgent);
   if (req.headers?.referer) args.push('--referer', req.headers.referer);
@@ -427,13 +433,21 @@ function startYtdlp(req: YtdlpJobRequest): void {
     return;
   }
 
-  const args = ['--newline', '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-P', outDir, '-o', '%(title).120s [%(id)s].%(ext)s'];
+  // Суффикс в имени — иначе аудио/видео-версии совпали бы по имени с полной,
+  // и yt-dlp молча пропустил бы скачивание («has already been downloaded»)
+  const nameSuffix = { both: '', video: ' [видео]', audio: ' [аудио]' }[req.streams ?? 'both'];
+  const args = [
+    ...YTDLP_COMMON_ARGS, '--no-playlist', '--force-overwrites',
+    '--concurrent-fragments', HLS_CONCURRENCY,
+    '-P', outDir, '-o', `%(title).120s [%(id)s]${nameSuffix}.%(ext)s`,
+  ];
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
-  if (req.streams === 'video') args.push('-f', 'bestvideo/best');
-  else if (req.streams === 'audio') args.push('-f', 'bestaudio/best');
+  // Предпочитаем mp4/m4a — их открывает всё; webm/opus только если иного нет
+  if (req.streams === 'video') args.push('-f', 'bestvideo[ext=mp4]/bestvideo/best');
+  else if (req.streams === 'audio') args.push('-f', 'bestaudio[ext=m4a]/bestaudio/best');
   args.push(req.pageUrl);
 
-  log('yt-dlp start', req.jobId, req.pageUrl);
+  log('yt-dlp start', req.jobId, req.pageUrl, 'streams:', req.streams ?? 'both');
   const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   const job = processJob(child);
   jobs.set(req.jobId, job);
@@ -572,9 +586,88 @@ function pickDir(req: PickDirRequest): void {
 
 function showInFolder(target: string): void {
   log('show_in_folder', target);
-  // Файл могли переместить/удалить — тогда открываем хотя бы папку
-  const args = fs.existsSync(target) ? [`/select,${target}`] : [path.dirname(target)];
-  spawn('explorer.exe', args, { detached: true, stdio: 'ignore' }).unref();
+  // Файл могли переместить/удалить — тогда открываем хотя бы папку.
+  // Кавычки ставим сами: авто-квотирование Node оборачивает «/select,путь»
+  // целиком, explorer такое не понимает и молча открывает «Документы».
+  const arg = fs.existsSync(target) ? `/select,"${target}"` : `"${path.dirname(target)}"`;
+  spawn('explorer.exe', [arg], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+}
+
+// ---------- Самообновление ----------
+
+const REPO = 'dimalebedeff/downy';
+// Корень установки (папка с package.json и build.mjs)
+const installRoot = path.join(coappRoot, '..');
+
+function runStep(cmd: string, args: string[], cwd: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, shell: false });
+    let errTail = '';
+    child.stderr?.on('data', (d: Buffer) => {
+      errTail = (errTail + d.toString()).slice(-1000);
+    });
+    child.on('error', (e) => resolve(`не удалось запустить ${cmd}: ${e.message}`));
+    child.on('close', (code) => resolve(code === 0 ? null : errTail || `${cmd}: exit code ${code}`));
+  });
+}
+
+async function runUpdate(req: UpdateRequest): Promise<void> {
+  const emitUpdate = (state: 'downloading' | 'installing' | 'done' | 'error', message?: string): void => {
+    sendMessage({ type: 'update', reqId: req.reqId, state, message });
+  };
+  if (jobs.size > 0) {
+    emitUpdate('error', 'Дождись окончания загрузок');
+    return;
+  }
+  // npm install может идти минуту — не даём Chrome усыпить service worker
+  const heartbeat = setInterval(() => sendMessage({ type: 'heartbeat' }), 10_000);
+  const tmpDir = path.join(os.tmpdir(), `downy-update-${Date.now()}`);
+  try {
+    // Тег приходит из GitHub API, но в URL он попадает только валидным
+    if (!/^v?[\w.-]+$/.test(req.tag)) throw new Error(`подозрительный тег: ${req.tag}`);
+    log('update start', req.tag);
+    emitUpdate('downloading');
+    const zipPath = path.join(tmpDir, 'downy.zip');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const resp = await fetch(`https://codeload.github.com/${REPO}/zip/refs/tags/${req.tag}`, { redirect: 'follow' });
+    if (!resp.ok) throw new Error(`GitHub ответил HTTP ${resp.status}`);
+    fs.writeFileSync(zipPath, Buffer.from(await resp.arrayBuffer()));
+
+    const extractDir = path.join(tmpDir, 'src');
+    const unzipErr = await runStep('powershell.exe', [
+      '-NoProfile', '-Command',
+      `Expand-Archive -Path '${zipPath}' -DestinationPath '${extractDir}' -Force`,
+    ], tmpDir);
+    if (unzipErr) throw new Error(`распаковка: ${unzipErr}`);
+    // Внутри zipball один корневой каталог вида downy-0.4
+    const [srcRoot] = fs.readdirSync(extractDir).map((n) => path.join(extractDir, n));
+    if (!srcRoot || !fs.existsSync(path.join(srcRoot, 'package.json'))) {
+      throw new Error('в архиве нет package.json — неожиданная структура');
+    }
+
+    emitUpdate('installing');
+    // Копируем исходники поверх установки; dist и bin архив не содержит,
+    // поэтому работающая версия остаётся целой до успешной сборки ниже
+    fs.cpSync(srcRoot, installRoot, { recursive: true, force: true });
+    const npmErr = await runStep('cmd.exe', ['/c', 'npm', 'install', '--no-audit', '--no-fund'], installRoot);
+    if (npmErr) throw new Error(`npm install: ${npmErr}`);
+    const buildErr = await runStep(process.execPath, ['build.mjs'], installRoot);
+    if (buildErr) throw new Error(`сборка: ${buildErr}`);
+
+    // Свежий yt-dlp важен (сайты ломают экстракторы), но его сбой не фатален
+    const ytdlpErr = await runStep(ytdlpPath, ['-U'], installRoot);
+    if (ytdlpErr) log('update: yt-dlp -U failed (non-fatal):', ytdlpErr.slice(-300));
+
+    log('update done', req.tag);
+    emitUpdate('done');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log('update error', msg);
+    emitUpdate('error', msg);
+  } finally {
+    clearInterval(heartbeat);
+    fs.rm(tmpDir, { recursive: true, force: true }, () => {});
+  }
 }
 
 function cancel(jobId: string): void {
@@ -620,6 +713,9 @@ readMessages((raw) => {
       break;
     case 'cancel':
       cancel(msg.jobId);
+      break;
+    case 'update':
+      void runUpdate(msg);
       break;
   }
 });
