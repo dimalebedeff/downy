@@ -2,6 +2,7 @@ import { classifyMedia, isProbablyVideo } from './lib/media-detect';
 import { canonicalMediaUrl } from './lib/media-group';
 import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDuration } from './lib/m3u8';
 import { buildFilename } from './lib/filename';
+import { isNewerVersion, REPO } from './lib/update';
 import type { JobInfo, MediaItem } from './lib/types';
 import type { CoAppEvent, CoAppRequest, PongEvent, StreamSelection } from '../../shared/protocol';
 
@@ -230,6 +231,17 @@ function getCoAppPort(): chrome.runtime.Port {
       return;
     }
     if (msg.type === 'heartbeat') return; // само получение сбрасывает таймер простоя SW
+    if (msg.type === 'update') {
+      broadcastUpdateProgress(msg.state, msg.message);
+      if (msg.state === 'done') {
+        updateInProgress = false;
+        // Даём попапу секунду показать «Готово» — и перечитываем extension/dist с диска
+        setTimeout(() => chrome.runtime.reload(), 1000);
+      } else if (msg.state === 'error') {
+        updateInProgress = false;
+      }
+      return;
+    }
     if (msg.type === 'thumb') {
       const target = pendingThumbs.get(msg.reqId);
       pendingThumbs.delete(msg.reqId);
@@ -257,6 +269,10 @@ function getCoAppPort(): chrome.runtime.Port {
   port.onDisconnect.addListener(() => {
     const err = chrome.runtime.lastError?.message;
     coappPort = null;
+    if (updateInProgress) {
+      updateInProgress = false;
+      broadcastUpdateProgress('error', err ?? 'CoApp отключился во время обновления');
+    }
     for (const resolve of pendingPickDir.values()) resolve({ dir: null, error: err ?? 'CoApp отключился' });
     pendingPickDir.clear();
     // Дадим шанс перезапросить кадры при следующем открытии попапа
@@ -415,6 +431,58 @@ async function startYtdlpJob(
   return res;
 }
 
+// ---------- Обновление Downy ----------
+
+// GitHub API без токена — 60 запросов/час с IP, поэтому кешируем надолго
+const UPDATE_CHECK_TTL_MS = 6 * 3600 * 1000;
+let updateInProgress = false;
+
+interface UpdateStatus {
+  available: boolean;
+  tag?: string;
+  current: string;
+}
+
+async function checkUpdate(): Promise<UpdateStatus> {
+  const current = chrome.runtime.getManifest().version;
+  const { updateCheck } = await chrome.storage.local.get('updateCheck');
+  let cached = updateCheck as { at: number; tag: string } | undefined;
+  if (!cached || Date.now() - cached.at >= UPDATE_CHECK_TTL_MS) {
+    try {
+      const resp = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const release = (await resp.json()) as { tag_name?: string };
+      cached = { at: Date.now(), tag: release.tag_name ?? '' };
+    } catch {
+      // Сети нет или лимит API — молчим и попробуем в следующий раз
+      cached = { at: Date.now(), tag: cached?.tag ?? '' };
+    }
+    void chrome.storage.local.set({ updateCheck: cached });
+  }
+  // «Доступно» вычисляем каждый раз: после обновления та же запись кеша уже не новее
+  return { available: isNewerVersion(current, cached.tag), tag: cached.tag, current };
+}
+
+function hasActiveJobs(): boolean {
+  return [...jobs.values()].some((j) => j.state === 'running' || j.state === 'starting');
+}
+
+async function runUpdate(): Promise<{ ok: boolean; error?: string }> {
+  if (updateInProgress) return { ok: true };
+  if (hasActiveJobs()) return { ok: false, error: 'Дождись окончания загрузок' };
+  const status = await checkUpdate();
+  if (!status.available || !status.tag) return { ok: false, error: 'Обновление не найдено' };
+  const res = sendToCoApp({ type: 'update', reqId: crypto.randomUUID(), tag: status.tag });
+  if (res.ok) updateInProgress = true;
+  return res;
+}
+
+function broadcastUpdateProgress(state: string, message?: string): void {
+  void chrome.runtime.sendMessage({ type: 'update-progress', state, message }).catch(() => {});
+}
+
 // ---------- Сообщения от попапа и content script ----------
 
 interface Message {
@@ -499,6 +567,14 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
       }
       case 'coapp-status': {
         sendResponse(await pingCoApp());
+        break;
+      }
+      case 'check-update': {
+        sendResponse(await checkUpdate());
+        break;
+      }
+      case 'run-update': {
+        sendResponse(await runUpdate());
         break;
       }
       case 'pick-out-dir': {

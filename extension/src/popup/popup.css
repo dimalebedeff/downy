@@ -188,3 +188,6 @@ footer {
 }
 
 summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+
+.version { color: var(--muted); font-size: 11px; margin-top: 8px; }
+#update-btn { width: 100%; font-weight: 600; }

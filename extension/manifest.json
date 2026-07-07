@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Downy",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Скачивание видео и аудио с любых сайтов",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAz5rellFpZLJ9sp5GUPTKDHRugUNjp3fOQo6sPpAcAYoenJ1DauuP8SIyny2H0lfVzQ/5U/SAFhgYIlHmOBvYRKjtSLjsAHVNhHVvTKVcorRK358R90ky4l6LyshOCYCS/rDaisTvGk7GnhCuL/r8BxKP7jrlKJ2bY8zIH/kwCU24iuRawd74dh0+Lhqft3e7oT5D1DHT/S8zgqYArcAOUM9xXHv8zFJrU/PKciCk+RrPBCDlIlWlabzpBDzrz0EfHzTunmvlyxmAH6xm57zdbqHfsBAlc9bmVuz/NcQgJ8B6Qn4yxNjBEbM4Sg1b0ZFjnzN5GsjgOKtP6Vbp8pZDeQIDAQAB",
   "permissions": ["webRequest", "storage", "tabs", "nativeMessaging"],

@@ -164,7 +164,59 @@ async function download(
   }
 }
 
+// ---------- Обновление Downy ----------
+
+const updateBtn = $<HTMLButtonElement>('#update-btn');
+let hasActiveJobs = false;
+let updating = false;
+
+function syncUpdateBtn(): void {
+  if (updateBtn.hidden || updating) return;
+  updateBtn.disabled = hasActiveJobs;
+  updateBtn.title = hasActiveJobs ? 'Дождись окончания загрузок' : '';
+}
+
+async function initUpdater(): Promise<void> {
+  $<HTMLDivElement>('#version').textContent = `Downy v${chrome.runtime.getManifest().version}`;
+  const status = await chrome.runtime.sendMessage({ type: 'check-update' });
+  if (!status?.available) return;
+  updateBtn.hidden = false;
+  updateBtn.textContent = `Обновить Downy до ${status.tag}`;
+  syncUpdateBtn();
+  updateBtn.addEventListener('click', async () => {
+    updating = true;
+    updateBtn.disabled = true;
+    updateBtn.textContent = 'Скачиваю…';
+    const res = await chrome.runtime.sendMessage({ type: 'run-update' });
+    if (!res?.ok) onUpdateProgress('error', res?.error);
+  });
+}
+
+function onUpdateProgress(state: string, message?: string): void {
+  switch (state) {
+    case 'downloading':
+      updateBtn.textContent = 'Скачиваю…';
+      break;
+    case 'installing':
+      updateBtn.textContent = 'Устанавливаю…';
+      break;
+    case 'done':
+      updateBtn.textContent = 'Готово, перезапускаюсь…';
+      break;
+    case 'error': {
+      updating = false;
+      updateBtn.disabled = false;
+      updateBtn.textContent = 'Обновление не удалось — повторить';
+      updateBtn.title = message ?? '';
+      showError(message ?? 'Обновление не удалось');
+      break;
+    }
+  }
+}
+
 function renderJobs(jobs: JobInfo[]): void {
+  hasActiveJobs = jobs.some((j) => j.state === 'running' || j.state === 'starting');
+  syncUpdateBtn();
   jobsSection.hidden = jobs.length === 0;
   jobsList.textContent = '';
   for (const job of jobs) {
@@ -256,7 +308,10 @@ async function init(): Promise<void> {
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === 'jobs-updated') renderJobs(msg.jobs ?? []);
+    if (msg?.type === 'update-progress') onUpdateProgress(msg.state, msg.message);
   });
+
+  void initUpdater();
 
   // Пока попап открыт, список может пополняться
   const mediaPoll = setInterval(() => void refresh(), 2000);

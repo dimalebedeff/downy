@@ -69,6 +69,14 @@ export interface ShowInFolderRequest {
   path: string;
 }
 
+/** Обновить Downy до релиза с GitHub: скачать zipball, пересобрать */
+export interface UpdateRequest {
+  type: 'update';
+  reqId: string;
+  /** Тег релиза, например "v0.4" */
+  tag: string;
+}
+
 /** Вытащить кадр-превью из видео/потока */
 export interface ThumbRequest {
   type: 'thumb';
@@ -88,7 +96,8 @@ export type CoAppRequest =
   | PingRequest
   | PickDirRequest
   | ThumbRequest
-  | ShowInFolderRequest;
+  | ShowInFolderRequest
+  | UpdateRequest;
 
 export interface PongEvent {
   type: 'pong';
@@ -138,4 +147,12 @@ export interface ThumbEvent {
   dataUrl: string | null;
 }
 
-export type CoAppEvent = PongEvent | JobEvent | PickDirEvent | ThumbEvent | HeartbeatEvent;
+/** Прогресс обновления Downy */
+export interface UpdateEvent {
+  type: 'update';
+  reqId: string;
+  state: 'downloading' | 'installing' | 'done' | 'error';
+  message?: string;
+}
+
+export type CoAppEvent = PongEvent | JobEvent | PickDirEvent | ThumbEvent | HeartbeatEvent | UpdateEvent;
