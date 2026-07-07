@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { classifyMedia } from '../src/lib/media-detect';
+import { classifyMedia, isProbablyVideo } from '../src/lib/media-detect';
+
+describe('isProbablyVideo', () => {
+  it('видео по Content-Type', () => {
+    expect(isProbablyVideo('https://cdn.example.com/stream', 'video/mp4')).toBe(true);
+    expect(isProbablyVideo('https://cdn.example.com/stream', 'video/webm; codecs=vp9')).toBe(true);
+  });
+
+  it('аудио по Content-Type — не видео', () => {
+    expect(isProbablyVideo('https://cdn.example.com/track.mp4', 'audio/mp4')).toBe(false);
+  });
+
+  it('по расширению, когда Content-Type неизвестен', () => {
+    expect(isProbablyVideo('https://cdn.example.com/clip.mp4?t=1')).toBe(true);
+    expect(isProbablyVideo('https://cdn.example.com/movie.mkv')).toBe(true);
+    expect(isProbablyVideo('https://cdn.example.com/song.mp3')).toBe(false);
+    expect(isProbablyVideo('https://cdn.example.com/voice.opus')).toBe(false);
+  });
+
+  it('неизвестный URL без типа — не видео', () => {
+    expect(isProbablyVideo('https://cdn.example.com/data')).toBe(false);
+    expect(isProbablyVideo('not a url')).toBe(false);
+  });
+});
 
 describe('classifyMedia', () => {
   it('распознаёт прямые файлы по расширению', () => {

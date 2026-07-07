@@ -1,4 +1,4 @@
-import { classifyMedia } from './lib/media-detect';
+import { classifyMedia, isProbablyVideo } from './lib/media-detect';
 import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDuration } from './lib/m3u8';
 import { buildFilename } from './lib/filename';
 import type { JobInfo, MediaItem } from './lib/types';
@@ -221,6 +221,11 @@ let coappPort: chrome.runtime.Port | null = null;
 // Ожидающие ответы диалога выбора папки: reqId -> resolve
 const pendingPickDir = new Map<string, (dir: string | null) => void>();
 
+// Запрошенные у CoApp кадры-превью: reqId -> куда положить результат
+const pendingThumbs = new Map<string, { tabId: number; url: string }>();
+// URL, по которым кадр уже запрашивали (успех или отказ) — не долбим ffmpeg повторно
+const thumbTried = new Set<string>();
+
 function getCoAppPort(): chrome.runtime.Port {
   if (coappPort) return coappPort;
   const port = chrome.runtime.connectNative(NATIVE_HOST);
@@ -229,6 +234,18 @@ function getCoAppPort(): chrome.runtime.Port {
       const resolve = pendingPickDir.get(msg.reqId);
       pendingPickDir.delete(msg.reqId);
       resolve?.(msg.dir);
+      return;
+    }
+    if (msg.type === 'thumb') {
+      const target = pendingThumbs.get(msg.reqId);
+      pendingThumbs.delete(msg.reqId);
+      if (target && msg.dataUrl) {
+        const item = tabMedia.get(target.tabId)?.get(target.url);
+        if (item && !item.thumb) {
+          item.thumb = msg.dataUrl;
+          persist();
+        }
+      }
       return;
     }
     if (msg.type !== 'job') return;
@@ -248,6 +265,9 @@ function getCoAppPort(): chrome.runtime.Port {
     coappPort = null;
     for (const resolve of pendingPickDir.values()) resolve(null);
     pendingPickDir.clear();
+    // Дадим шанс перезапросить кадры при следующем открытии попапа
+    for (const { url } of pendingThumbs.values()) thumbTried.delete(url);
+    pendingThumbs.clear();
     for (const job of jobs.values()) {
       if (job.state === 'running' || job.state === 'starting') {
         job.state = 'error';
@@ -301,6 +321,25 @@ function pingCoApp(): Promise<{ ok: boolean; info?: PongEvent; error?: string }>
     });
     port.postMessage({ type: 'ping' } satisfies CoAppRequest);
   });
+}
+
+/** Просит CoApp вытащить кадр для элемента без превью (лениво, при открытом попапе). */
+function requestThumb(item: MediaItem): void {
+  if (item.thumb || thumbTried.has(item.url)) return;
+  if (item.kind !== 'hls' && !isProbablyVideo(item.url, item.contentType)) return;
+  thumbTried.add(item.url);
+  const reqId = crypto.randomUUID();
+  pendingThumbs.set(reqId, { tabId: item.tabId, url: item.url });
+  const res = sendToCoApp({
+    type: 'thumb',
+    reqId,
+    url: item.url,
+    headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
+  });
+  if (!res.ok) {
+    pendingThumbs.delete(reqId);
+    thumbTried.delete(item.url);
+  }
 }
 
 async function getOutDir(): Promise<string | undefined> {
@@ -410,6 +449,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
       case 'get-media': {
         const tabId = msg.tabId as number;
         const items = [...(tabMedia.get(tabId)?.values() ?? [])].sort((a, b) => a.foundAt - b.foundAt);
+        for (const item of items) requestThumb(item);
         sendResponse({ items, jobs: [...jobs.values()], pageThumb: tabPageThumb.get(tabId) });
         break;
       }

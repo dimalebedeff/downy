@@ -34,6 +34,20 @@ const HLS_TYPES = new Set([
 
 const SEGMENT_TYPES = new Set(['video/mp2t', 'video/iso.segment']);
 
+const VIDEO_EXT = /\.(mp4|m4v|webm|mkv|mov|avi)$/i;
+
+/** Похоже ли прямое медиа на видео (для него имеет смысл кадр-превью). */
+export function isProbablyVideo(url: string, contentType?: string | null): boolean {
+  const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
+  if (ct.startsWith('video/')) return true;
+  if (ct.startsWith('audio/')) return false;
+  try {
+    return VIDEO_EXT.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
 /** Классифицирует URL (+ Content-Type, если известен) как медиа или нет. */
 export function classifyMedia(url: string, contentType?: string | null): MediaKind | null {
   let pathname: string;

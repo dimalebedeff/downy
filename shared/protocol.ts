@@ -54,13 +54,25 @@ export interface PickDirRequest {
   current?: string;
 }
 
+/** Вытащить кадр-превью из видео/потока */
+export interface ThumbRequest {
+  type: 'thumb';
+  reqId: string;
+  url: string;
+  headers?: {
+    referer?: string;
+    userAgent?: string;
+  };
+}
+
 export type CoAppRequest =
   | HlsJobRequest
   | DirectJobRequest
   | YtdlpJobRequest
   | CancelRequest
   | PingRequest
-  | PickDirRequest;
+  | PickDirRequest
+  | ThumbRequest;
 
 export interface PongEvent {
   type: 'pong';
@@ -94,4 +106,11 @@ export interface JobEvent {
   outFile?: string;
 }
 
-export type CoAppEvent = PongEvent | JobEvent | PickDirEvent;
+export interface ThumbEvent {
+  type: 'thumb';
+  reqId: string;
+  /** data:image/jpeg;base64,… или null, если кадр вытащить не удалось */
+  dataUrl: string | null;
+}
+
+export type CoAppEvent = PongEvent | JobEvent | PickDirEvent | ThumbEvent;

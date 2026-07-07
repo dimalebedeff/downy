@@ -4,7 +4,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readMessages, sendMessage } from './nm';
-import type { CoAppRequest, DirectJobRequest, HlsJobRequest, JobEvent, PickDirRequest, YtdlpJobRequest } from '../../shared/protocol';
+import type {
+  CoAppRequest,
+  DirectJobRequest,
+  HlsJobRequest,
+  JobEvent,
+  PickDirRequest,
+  ThumbRequest,
+  YtdlpJobRequest,
+} from '../../shared/protocol';
 
 const VERSION = '0.2.0';
 
@@ -300,6 +308,71 @@ function startYtdlp(req: YtdlpJobRequest): void {
   });
 }
 
+// ---------- Кадры-превью ----------
+
+// Не даём ffmpeg разгуляться: превью — фон, загрузки важнее
+const THUMB_CONCURRENCY = 2;
+const THUMB_TIMEOUT_MS = 20_000;
+const thumbQueue: ThumbRequest[] = [];
+let thumbActive = 0;
+
+function enqueueThumb(req: ThumbRequest): void {
+  thumbQueue.push(req);
+  pumpThumbs();
+}
+
+function pumpThumbs(): void {
+  while (thumbActive < THUMB_CONCURRENCY && thumbQueue.length > 0) {
+    const req = thumbQueue.shift()!;
+    thumbActive++;
+    runThumb(req, () => {
+      thumbActive--;
+      pumpThumbs();
+    });
+  }
+}
+
+function runThumb(req: ThumbRequest, done: () => void): void {
+  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
+  if (req.headers?.userAgent) args.push('-user_agent', req.headers.userAgent);
+  if (req.headers?.referer) args.push('-referer', req.headers.referer);
+  args.push(
+    '-ss', '1',
+    '-i', req.url,
+    '-frames:v', '1',
+    '-vf', 'scale=192:-2',
+    '-f', 'image2pipe',
+    '-c:v', 'mjpeg',
+    '-q:v', '5',
+    'pipe:1',
+  );
+
+  const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  const chunks: Buffer[] = [];
+  let finished = false;
+  const finish = (dataUrl: string | null): void => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    sendMessage({ type: 'thumb', reqId: req.reqId, dataUrl });
+    done();
+  };
+  const timer = setTimeout(() => {
+    log('thumb timeout', req.url);
+    child.kill('SIGKILL');
+  }, THUMB_TIMEOUT_MS);
+
+  child.stdout?.on('data', (d: Buffer) => chunks.push(d));
+  child.on('error', (e) => {
+    log('thumb spawn error', e.message);
+    finish(null);
+  });
+  child.on('close', (code) => {
+    const buf = Buffer.concat(chunks);
+    finish(code === 0 && buf.length > 0 ? `data:image/jpeg;base64,${buf.toString('base64')}` : null);
+  });
+}
+
 function pickDir(req: PickDirRequest): void {
   // Диалог выбора папки — через PowerShell (WinForms). Асинхронно, чтобы
   // не блокировать прогресс идущих загрузок, пока диалог открыт.
@@ -360,6 +433,9 @@ readMessages((raw) => {
       break;
     case 'pick_dir':
       pickDir(msg);
+      break;
+    case 'thumb':
+      enqueueThumb(msg);
       break;
     case 'download_hls':
       startHls(msg);
