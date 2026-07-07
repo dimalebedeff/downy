@@ -17,7 +17,7 @@ import type {
 } from '../../shared/protocol';
 
 // Держи в синхроне с extension/manifest.json и package.json
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 
 // __dirname указывает на coapp/dist после сборки
 const coappRoot = path.join(__dirname, '..');
