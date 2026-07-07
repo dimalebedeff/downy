@@ -1,4 +1,5 @@
 import type { JobInfo, MediaItem } from '../lib/types';
+import { fmtSize, jobProgressView } from '../lib/progress';
 
 const $ = <T extends HTMLElement>(sel: string): T => document.querySelector(sel) as T;
 
@@ -11,14 +12,6 @@ const outDirInput = $<HTMLInputElement>('#out-dir');
 
 let activeTab: chrome.tabs.Tab | undefined;
 let pageThumb: string | undefined;
-
-function fmtSize(bytes?: number): string {
-  if (!bytes) return '';
-  const mb = bytes / (1024 * 1024);
-  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} ГБ`;
-  if (mb >= 1) return `${mb.toFixed(1)} МБ`;
-  return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
-}
 
 function fmtDuration(sec?: number): string {
   if (!sec) return '';
@@ -146,10 +139,7 @@ function renderJobs(jobs: JobInfo[]): void {
     } else if (job.state === 'canceled') {
       state.textContent = 'отменено';
     } else {
-      const parts: string[] = [];
-      if (job.bytes) parts.push(job.totalBytes ? `${fmtSize(job.bytes)} / ${fmtSize(job.totalBytes)}` : fmtSize(job.bytes));
-      if (job.progress != null) parts.push(`${Math.round(job.progress * 100)}%`);
-      state.textContent = parts.join(' · ') || 'идёт…';
+      state.textContent = jobProgressView(job).text;
     }
     row.append(title, state);
 
@@ -168,9 +158,10 @@ function renderJobs(jobs: JobInfo[]): void {
 
     if (job.state === 'running' || job.state === 'starting') {
       const bar = document.createElement('progress');
-      if (job.progress != null) {
+      const { ratio } = jobProgressView(job);
+      if (ratio != null) {
         bar.max = 1;
-        bar.value = job.progress;
+        bar.value = ratio;
       }
       li.append(bar);
     }
