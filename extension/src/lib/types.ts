@@ -1,9 +1,10 @@
 import type { HlsVariant } from './m3u8';
+import type { MediaKind } from './media-detect';
 
 export interface MediaItem {
   /** Ключ — сам URL */
   url: string;
-  kind: 'direct' | 'hls';
+  kind: MediaKind;
   tabId: number;
   foundAt: number;
   contentType?: string;

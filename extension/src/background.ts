@@ -1,6 +1,7 @@
 import { classifyMedia, isProbablyVideo } from './lib/media-detect';
 import { canonicalMediaUrl } from './lib/media-group';
 import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDuration } from './lib/m3u8';
+import { looksLikeMpd, mpdDuration } from './lib/mpd';
 import { buildFilename } from './lib/filename';
 import { isNewerVersion, REPO } from './lib/update';
 import type { JobInfo, MediaItem } from './lib/types';
@@ -178,6 +179,35 @@ async function addHls(tabId: number, url: string, pageTitle?: string, thumb?: st
   }
 }
 
+async function addDash(tabId: number, url: string, pageTitle?: string, thumb?: string): Promise<void> {
+  await restored;
+  if (getTabItems(tabId).has(url)) return;
+  const inflightKey = `${tabId}:${url}`;
+  if (inflightHls.has(inflightKey)) return;
+  inflightHls.add(inflightKey);
+  try {
+    const resp = await fetch(url, { credentials: 'include' });
+    if (!resp.ok) return;
+    const text = await resp.text();
+    if (!looksLikeMpd(text)) return;
+    const info = await pageInfo(tabId);
+    upsertItem({
+      url,
+      kind: 'dash',
+      tabId,
+      foundAt: Date.now(),
+      thumb,
+      pageUrl: info.pageUrl,
+      pageTitle: pageTitle ?? info.pageTitle,
+      durationSec: mpdDuration(text) ?? undefined,
+    });
+  } catch {
+    // сеть/CORS — просто не показываем этот манифест
+  } finally {
+    inflightHls.delete(inflightKey);
+  }
+}
+
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     if (details.tabId < 0) return;
@@ -189,6 +219,10 @@ chrome.webRequest.onHeadersReceived.addListener(
     if (!kind) return;
     if (kind === 'hls') {
       void addHls(details.tabId, details.url);
+      return;
+    }
+    if (kind === 'dash') {
+      void addDash(details.tabId, details.url);
       return;
     }
     let size: number | undefined;
@@ -342,7 +376,8 @@ function pingCoApp(): Promise<{ ok: boolean; info?: PongEvent; error?: string }>
 /** Просит CoApp вытащить кадр для элемента без превью (лениво, при открытом попапе). */
 function requestThumb(item: MediaItem): void {
   if (item.thumb || thumbTried.has(item.url)) return;
-  if (item.kind !== 'hls' && !isProbablyVideo(item.url, item.contentType)) return;
+  // Стримы считаем видео; для прямых файлов кадр имеет смысл только у видео
+  if (item.kind === 'direct' && !isProbablyVideo(item.url, item.contentType)) return;
   thumbTried.add(item.url);
   const reqId = crypto.randomUUID();
   pendingThumbs.set(reqId, { tabId: item.tabId, url: item.url });
@@ -514,6 +549,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         for (const entry of (msg.media ?? []) as { url: string; thumb?: string }[]) {
           const kind = classifyMedia(entry.url);
           if (kind === 'hls') void addHls(tabId, entry.url, pageTitle, entry.thumb);
+          else if (kind === 'dash') void addDash(tabId, entry.url, pageTitle, entry.thumb);
           else if (kind === 'direct') void addDirect(tabId, canonicalMediaUrl(entry.url), undefined, undefined, pageTitle, entry.thumb);
           else if (entry.thumb) {
             // Медиа уже могло быть найдено по сети — хотя бы дольём превью

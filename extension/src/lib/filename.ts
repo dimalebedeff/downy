@@ -50,7 +50,7 @@ export function extFromUrl(url: string): string | null {
 
 export interface FilenameSource {
   url: string;
-  kind: 'direct' | 'hls';
+  kind: 'direct' | 'hls' | 'dash';
   pageTitle?: string;
   contentType?: string;
 }
@@ -75,7 +75,8 @@ export function buildFilename(item: FilenameSource, variantLabel?: string, strea
   }
   const suffix = (variantLabel ? ` [${variantLabel}]` : '') + STREAMS_LABEL[streams];
   let ext: string;
-  if (item.kind === 'hls') {
+  if (item.kind !== 'direct') {
+    // Стримы (HLS/DASH) всегда склеиваются в mp4/m4a
     ext = streams === 'audio' ? 'm4a' : 'mp4';
   } else {
     const ct = (item.contentType ?? '').split(';')[0].trim().toLowerCase();

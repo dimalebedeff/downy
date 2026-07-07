@@ -95,4 +95,10 @@ describe('buildFilename с выбором дорожек', () => {
     const mp3 = { ...mp4, url: 'https://cdn.example.com/song.mp3' };
     expect(buildFilename(mp3, undefined, 'audio')).toBe('Клип [аудио].mp3');
   });
+
+  it('dash ведёт себя как hls: mp4, аудио — m4a', () => {
+    const dash = { url: 'https://cdn.example.com/manifest.mpd', kind: 'dash' as const, pageTitle: 'Фильм' };
+    expect(buildFilename(dash)).toBe('Фильм.mp4');
+    expect(buildFilename(dash, undefined, 'audio')).toBe('Фильм [аудио].m4a');
+  });
 });

@@ -67,7 +67,7 @@ function renderMedia(items: MediaItem[]): void {
       img.addEventListener('error', () => img.remove());
       thumbBox.append(img);
     } else {
-      thumbBox.textContent = item.kind === 'hls' || item.contentType?.startsWith('video') ? '🎬' : '🎵';
+      thumbBox.textContent = item.kind !== 'direct' || item.contentType?.startsWith('video') ? '🎬' : '🎵';
     }
 
     const body = document.createElement('div');
@@ -77,7 +77,10 @@ function renderMedia(items: MediaItem[]): void {
     row1.className = 'row1';
     const chip = document.createElement('span');
     chip.className = 'chip';
-    chip.textContent = item.kind === 'hls' ? 'HLS' : (item.contentType?.split('/')[1] ?? 'файл').toUpperCase().slice(0, 5);
+    chip.textContent =
+      item.kind === 'hls' ? 'HLS'
+      : item.kind === 'dash' ? 'DASH'
+      : (item.contentType?.split('/')[1] ?? 'файл').toUpperCase().slice(0, 5);
     const title = document.createElement('span');
     title.className = 'title';
     title.textContent = itemTitle(item);
@@ -120,7 +123,7 @@ function renderMedia(items: MediaItem[]): void {
 
     // Для видео можно выбрать, какие дорожки сохранять
     let streams: HTMLSelectElement | null = null;
-    if (item.kind === 'hls' || isProbablyVideo(item.url, item.contentType)) {
+    if (item.kind !== 'direct' || isProbablyVideo(item.url, item.contentType)) {
       streams = streamsSelect();
       row2.append(streams);
     }

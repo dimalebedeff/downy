@@ -3,10 +3,11 @@
 /** Какие дорожки сохранять: всё, только видео или только аудио */
 export type StreamSelection = 'both' | 'video' | 'audio';
 
+/** Скачивание стрима (HLS или DASH) — yt-dlp понимает оба формата */
 export interface HlsJobRequest {
   type: 'download_hls';
   jobId: string;
-  /** URL медиа-плейлиста или выбранного варианта из мастер-плейлиста */
+  /** URL m3u8-плейлиста (или варианта из мастера) либо mpd-манифеста */
   url: string;
   /** Имя файла с расширением, уже безопасное для файловой системы */
   filename: string;

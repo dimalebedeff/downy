@@ -1,7 +1,8 @@
-export type MediaKind = 'direct' | 'hls';
+export type MediaKind = 'direct' | 'hls' | 'dash';
 
 const DIRECT_EXT = /\.(mp4|m4v|webm|mkv|mov|avi|mp3|m4a|aac|ogg|oga|opus|wav|flac)$/i;
 const HLS_EXT = /\.m3u8$/i;
+const DASH_EXT = /\.mpd$/i;
 // Сегменты стримов — не самостоятельное медиа, их не показываем.
 const SEGMENT_EXT = /\.(ts|m4s|m2ts|init)$/i;
 
@@ -32,6 +33,8 @@ const HLS_TYPES = new Set([
   'application/mpegurl',
 ]);
 
+const DASH_TYPES = new Set(['application/dash+xml']);
+
 const SEGMENT_TYPES = new Set(['video/mp2t', 'video/iso.segment']);
 
 const VIDEO_EXT = /\.(mp4|m4v|webm|mkv|mov|avi)$/i;
@@ -60,6 +63,7 @@ export function classifyMedia(url: string, contentType?: string | null): MediaKi
 
   if (SEGMENT_TYPES.has(ct) || SEGMENT_EXT.test(pathname)) return null;
   if (HLS_TYPES.has(ct) || HLS_EXT.test(pathname)) return 'hls';
+  if (DASH_TYPES.has(ct) || DASH_EXT.test(pathname)) return 'dash';
   if (DIRECT_TYPES.has(ct) || DIRECT_EXT.test(pathname)) return 'direct';
   return null;
 }

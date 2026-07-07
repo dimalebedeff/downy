@@ -64,8 +64,9 @@ export function groupMediaItems(items: MediaItem[]): MediaGroup[] {
   const sorted = items.slice().sort((a, b) => a.foundAt - b.foundAt);
   for (const item of sorted) {
     if (isJunk(item)) continue;
-    // HLS не группируем: варианты качества уже внутри самого элемента
-    const key = item.kind === 'hls' ? `hls|${item.url}` : groupKey(item);
+    // Стримы не группируем: у HLS варианты качества уже внутри элемента,
+    // у DASH качества выбирает yt-dlp
+    const key = item.kind !== 'direct' ? `${item.kind}|${item.url}` : groupKey(item);
     let g = groups.get(key);
     if (!g) {
       g = [];

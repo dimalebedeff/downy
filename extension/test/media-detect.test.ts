@@ -42,6 +42,13 @@ describe('classifyMedia', () => {
     expect(classifyMedia('https://cdn.example.com/stream', 'application/x-mpegURL; charset=utf-8')).toBe('hls');
   });
 
+  it('распознаёт DASH-манифесты', () => {
+    expect(classifyMedia('https://cdn.example.com/manifest.mpd')).toBe('dash');
+    expect(classifyMedia('https://cdn.example.com/v/manifest.MPD?sig=x')).toBe('dash');
+    expect(classifyMedia('https://cdn.example.com/stream', 'application/dash+xml')).toBe('dash');
+    expect(classifyMedia('https://cdn.example.com/stream', 'application/dash+xml; charset=utf-8')).toBe('dash');
+  });
+
   it('расширение побеждает octet-stream', () => {
     expect(classifyMedia('https://cdn.example.com/video.mp4', 'application/octet-stream')).toBe('direct');
   });
