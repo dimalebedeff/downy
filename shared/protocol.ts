@@ -1,5 +1,8 @@
 // Протокол сообщений между расширением и CoApp (Native Messaging).
 
+/** Какие дорожки сохранять: всё, только видео или только аудио */
+export type StreamSelection = 'both' | 'video' | 'audio';
+
 export interface HlsJobRequest {
   type: 'download_hls';
   jobId: string;
@@ -9,6 +12,8 @@ export interface HlsJobRequest {
   filename: string;
   /** Папка сохранения; пусто — Downloads\downy */
   outDir?: string;
+  /** По умолчанию 'both' */
+  streams?: StreamSelection;
   headers?: {
     referer?: string;
     userAgent?: string;
@@ -24,6 +29,8 @@ export interface DirectJobRequest {
   filename: string;
   /** Папка сохранения; пусто — Downloads\downy */
   outDir?: string;
+  /** По умолчанию 'both' */
+  streams?: StreamSelection;
   headers?: {
     referer?: string;
     userAgent?: string;
@@ -35,6 +42,8 @@ export interface YtdlpJobRequest {
   jobId: string;
   pageUrl: string;
   outDir?: string;
+  /** По умолчанию 'both' */
+  streams?: StreamSelection;
 }
 
 export interface CancelRequest {

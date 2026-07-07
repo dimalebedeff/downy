@@ -10,6 +10,7 @@ import type {
   HlsJobRequest,
   JobEvent,
   PickDirRequest,
+  StreamSelection,
   ThumbRequest,
   YtdlpJobRequest,
 } from '../../shared/protocol';
@@ -163,10 +164,12 @@ function cleanupPartials(outFile: string): void {
 }
 
 function startHls(req: HlsJobRequest): void {
+  const streams = req.streams ?? 'both';
   let outFile: string;
   try {
     const outDir = resolveOutDir(req.outDir);
-    const filename = req.filename.toLowerCase().endsWith('.mp4') ? req.filename : `${req.filename}.mp4`;
+    const wantExt = streams === 'audio' ? '.m4a' : '.mp4';
+    const filename = req.filename.toLowerCase().endsWith(wantExt) ? req.filename : `${req.filename}${wantExt}`;
     outFile = uniquePath(outDir, filename);
   } catch (e) {
     emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: String(e) });
@@ -175,18 +178,21 @@ function startHls(req: HlsJobRequest): void {
 
   // yt-dlp качает сегменты параллельно и обходит троттлинг на одно соединение;
   // ffmpeg (последовательный) — только фолбэк
-  if (ytdlpWorks()) startHlsYtdlp(req, outFile);
-  else startHlsFfmpeg(req, outFile);
+  if (ytdlpWorks()) startHlsYtdlp(req, outFile, streams);
+  else startFfmpegCopy(req, outFile, streams);
 }
 
-function startHlsYtdlp(req: HlsJobRequest, outFile: string): void {
-  const args = ['--newline', '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-o', outFile];
+function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelection): void {
+  // Дорожку вырезаем после скачивания: в муксованном HLS yt-dlp не умеет
+  // отдать только видео/аудио, а качать медленным ffmpeg напрямую — терять скорость
+  const dlFile = streams === 'both' ? outFile : `${outFile}.dl.mp4`;
+  const args = ['--newline', '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-o', dlFile];
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
   if (req.headers?.userAgent) args.push('--user-agent', req.headers.userAgent);
   if (req.headers?.referer) args.push('--referer', req.headers.referer);
   args.push(req.url);
 
-  log('yt-dlp hls start', req.jobId, req.url, '->', outFile);
+  log('yt-dlp hls start', req.jobId, req.url, '->', outFile, 'streams:', streams);
   const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   const job = processJob(child);
   jobs.set(req.jobId, job);
@@ -205,8 +211,8 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string): void {
     settled = true;
     log('yt-dlp hls fallback to ffmpeg', req.jobId, reason.slice(-300));
     jobs.delete(req.jobId);
-    cleanupPartials(outFile);
-    startHlsFfmpeg(req, outFile);
+    cleanupPartials(dlFile);
+    startFfmpegCopy(req, outFile, streams);
   };
 
   child.on('error', (e) => {
@@ -219,21 +225,71 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string): void {
     log('yt-dlp hls exit', req.jobId, code, 'canceled:', job.canceled);
     if (job.canceled) {
       jobs.delete(req.jobId);
-      cleanupPartials(outFile);
+      cleanupPartials(dlFile);
       emit({ type: 'job', jobId: req.jobId, state: 'canceled', progress: null });
     } else if (code === 0) {
-      jobDone(req.jobId, code, false, outFile, errTail);
+      if (streams === 'both') jobDone(req.jobId, code, false, outFile, errTail);
+      else stripTracks(req.jobId, dlFile, outFile, streams);
     } else {
       fallback(errTail);
     }
   });
 }
 
-function startHlsFfmpeg(req: HlsJobRequest, outFile: string): void {
+/** Копирует из скачанного файла только выбранную дорожку (без перекодирования). */
+function stripTracks(jobId: string, srcFile: string, outFile: string, streams: 'video' | 'audio'): void {
+  const args = ['-y', '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', srcFile];
+  args.push('-map', streams === 'video' ? '0:v' : '0:a', '-c', 'copy');
+  if (/\.(mp4|m4a|mov)$/i.test(outFile)) args.push('-movflags', '+faststart');
+  args.push(outFile);
+
+  log('strip start', jobId, srcFile, '->', outFile);
+  const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+  // Отмена с этого момента должна убивать ffmpeg, а не завершившийся yt-dlp
+  const job = processJob(child);
+  jobs.set(jobId, job);
+
+  let errTail = '';
+  child.stderr?.on('data', (d: Buffer) => {
+    errTail = (errTail + d.toString()).slice(-2000);
+  });
+
+  let settled = false;
+  const finish = (code: number | null): void => {
+    if (settled) return;
+    settled = true;
+    // Синхронно: после jobDone хост могут закрыть, и хвост останется на диске
+    try {
+      fs.rmSync(srcFile, { force: true });
+    } catch {
+      // временный файл не критичен
+    }
+    log('strip exit', jobId, code, 'canceled:', job.canceled);
+    jobDone(jobId, code, job.canceled, outFile, errTail);
+  };
+  child.on('error', (e) => {
+    errTail = `Не удалось запустить ffmpeg: ${e.message}`;
+    finish(1);
+  });
+  child.on('close', finish);
+}
+
+interface FfmpegCopySource {
+  jobId: string;
+  url: string;
+  headers?: { referer?: string; userAgent?: string };
+}
+
+function startFfmpegCopy(req: FfmpegCopySource, outFile: string, streams: StreamSelection): void {
   const args = ['-y', '-nostdin', '-hide_banner'];
   if (req.headers?.userAgent) args.push('-user_agent', req.headers.userAgent);
   if (req.headers?.referer) args.push('-referer', req.headers.referer);
-  args.push('-i', req.url, '-c', 'copy', '-movflags', '+faststart', '-progress', 'pipe:1', outFile);
+  args.push('-i', req.url);
+  if (streams === 'video') args.push('-map', '0:v');
+  else if (streams === 'audio') args.push('-map', '0:a');
+  args.push('-c', 'copy');
+  if (/\.(mp4|m4a|mov)$/i.test(outFile)) args.push('-movflags', '+faststart');
+  args.push('-progress', 'pipe:1', outFile);
 
   log('ffmpeg start', req.jobId, req.url, '->', outFile);
   const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
@@ -296,6 +352,13 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
     outFile = uniquePath(outDir, req.filename);
   } catch (e) {
     emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: String(e) });
+    return;
+  }
+
+  // Отдельную дорожку из файла умеет вырезать только ffmpeg (без перекодирования)
+  const streams = req.streams ?? 'both';
+  if (streams !== 'both') {
+    startFfmpegCopy(req, outFile, streams);
     return;
   }
 
@@ -366,6 +429,8 @@ function startYtdlp(req: YtdlpJobRequest): void {
 
   const args = ['--newline', '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-P', outDir, '-o', '%(title).120s [%(id)s].%(ext)s'];
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
+  if (req.streams === 'video') args.push('-f', 'bestvideo/best');
+  else if (req.streams === 'audio') args.push('-f', 'bestaudio/best');
   args.push(req.pageUrl);
 
   log('yt-dlp start', req.jobId, req.pageUrl);

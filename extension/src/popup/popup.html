@@ -23,7 +23,14 @@
   </section>
 
   <footer>
-    <button id="ytdlp-page">Скачать страницу через yt-dlp</button>
+    <div class="ytdlp-row">
+      <button id="ytdlp-page">Скачать страницу через yt-dlp</button>
+      <select id="ytdlp-streams" title="Какие дорожки сохранить">
+        <option value="both">видео+звук</option>
+        <option value="video">видео</option>
+        <option value="audio">звук</option>
+      </select>
+    </div>
     <details>
       <summary>Настройки</summary>
       <label class="field">

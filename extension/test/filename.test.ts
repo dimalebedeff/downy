@@ -60,3 +60,39 @@ describe('buildFilename', () => {
     expect(name).toBe('Аудио.mp3');
   });
 });
+
+describe('buildFilename с выбором дорожек', () => {
+  const hls = { url: 'https://cdn.example.com/master.m3u8', kind: 'hls' as const, pageTitle: 'Фильм' };
+  const mp4 = { url: 'https://cdn.example.com/clip.mp4', kind: 'direct' as const, pageTitle: 'Клип' };
+
+  it('both не меняет имя', () => {
+    expect(buildFilename(hls, '720p', 'both')).toBe('Фильм [720p].mp4');
+  });
+
+  it('hls только видео — пометка, контейнер mp4', () => {
+    expect(buildFilename(hls, undefined, 'video')).toBe('Фильм [видео].mp4');
+  });
+
+  it('hls только аудио — контейнер m4a', () => {
+    expect(buildFilename(hls, '720p', 'audio')).toBe('Фильм [720p] [аудио].m4a');
+  });
+
+  it('direct только видео сохраняет контейнер', () => {
+    const webm = { ...mp4, url: 'https://cdn.example.com/clip.webm' };
+    expect(buildFilename(webm, undefined, 'video')).toBe('Клип [видео].webm');
+  });
+
+  it('direct аудио из mp4 — m4a', () => {
+    expect(buildFilename(mp4, undefined, 'audio')).toBe('Клип [аудио].m4a');
+  });
+
+  it('direct аудио из webm остаётся webm', () => {
+    const webm = { ...mp4, url: 'https://cdn.example.com/clip.webm' };
+    expect(buildFilename(webm, undefined, 'audio')).toBe('Клип [аудио].webm');
+  });
+
+  it('direct аудио из аудиофайла не меняет расширение', () => {
+    const mp3 = { ...mp4, url: 'https://cdn.example.com/song.mp3' };
+    expect(buildFilename(mp3, undefined, 'audio')).toBe('Клип [аудио].mp3');
+  });
+});

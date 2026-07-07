@@ -1,6 +1,8 @@
 import type { JobInfo, MediaItem } from '../lib/types';
+import type { StreamSelection } from '../../../shared/protocol';
 import { fmtSize, jobProgressView } from '../lib/progress';
 import { groupMediaItems } from '../lib/media-group';
+import { isProbablyVideo } from '../lib/media-detect';
 
 const $ = <T extends HTMLElement>(sel: string): T => document.querySelector(sel) as T;
 
@@ -21,6 +23,20 @@ function fmtDuration(sec?: number): string {
   const s = Math.round(sec % 60);
   const mm = h ? String(m).padStart(2, '0') : String(m);
   return `${h ? h + ':' : ''}${mm}:${String(s).padStart(2, '0')}`;
+}
+
+/** Селектор «что качать»: видео+звук / только видео / только звук */
+function streamsSelect(): HTMLSelectElement {
+  const select = document.createElement('select');
+  select.className = 'streams';
+  select.title = 'Какие дорожки сохранить';
+  for (const [value, label] of [['both', 'видео+звук'], ['video', 'видео'], ['audio', 'звук']]) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    select.append(opt);
+  }
+  return select;
 }
 
 function itemTitle(item: MediaItem): string {
@@ -102,6 +118,13 @@ function renderMedia(items: MediaItem[]): void {
       row2.append(select);
     }
 
+    // Для видео можно выбрать, какие дорожки сохранять
+    let streams: HTMLSelectElement | null = null;
+    if (item.kind === 'hls' || isProbablyVideo(item.url, item.contentType)) {
+      streams = streamsSelect();
+      row2.append(streams);
+    }
+
     const btn = document.createElement('button');
     btn.textContent = 'Скачать';
     btn.addEventListener('click', () => {
@@ -109,7 +132,7 @@ function renderMedia(items: MediaItem[]): void {
         item.kind === 'direct' && select
           ? group.members.find((m) => m.url === select!.value) ?? item
           : item;
-      void download(chosen, item.kind === 'hls' ? select : null, btn);
+      void download(chosen, item.kind === 'hls' ? select : null, (streams?.value as StreamSelection) ?? 'both', btn);
     });
     row2.append(btn);
 
@@ -119,16 +142,21 @@ function renderMedia(items: MediaItem[]): void {
   }
 }
 
-async function download(item: MediaItem, select: HTMLSelectElement | null, btn: HTMLButtonElement): Promise<void> {
+async function download(
+  item: MediaItem,
+  select: HTMLSelectElement | null,
+  streams: StreamSelection,
+  btn: HTMLButtonElement,
+): Promise<void> {
   btn.disabled = true;
   try {
     if (item.kind === 'direct') {
-      const res = await chrome.runtime.sendMessage({ type: 'download-direct', item });
+      const res = await chrome.runtime.sendMessage({ type: 'download-direct', item, streams });
       if (!res?.ok) showError(res?.error ?? 'Не удалось начать скачивание');
     } else {
       const variantUrl = select?.value;
       const variantLabel = select?.selectedOptions[0]?.textContent ?? undefined;
-      const res = await chrome.runtime.sendMessage({ type: 'download-hls', item, variantUrl, variantLabel });
+      const res = await chrome.runtime.sendMessage({ type: 'download-hls', item, variantUrl, variantLabel, streams });
       if (!res?.ok) showError(res?.error ?? 'CoApp недоступен');
     }
   } finally {
@@ -241,6 +269,7 @@ async function init(): Promise<void> {
       type: 'download-ytdlp',
       pageUrl: activeTab?.url,
       pageTitle: activeTab?.title,
+      streams: $<HTMLSelectElement>('#ytdlp-streams').value,
     });
     if (!res?.ok) showError(res?.error ?? 'CoApp недоступен');
     setTimeout(() => (btn.disabled = false), 1500);

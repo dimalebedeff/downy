@@ -3,7 +3,7 @@ import { canonicalMediaUrl } from './lib/media-group';
 import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDuration } from './lib/m3u8';
 import { buildFilename } from './lib/filename';
 import type { JobInfo, MediaItem } from './lib/types';
-import type { CoAppEvent, CoAppRequest, PongEvent } from '../../shared/protocol';
+import type { CoAppEvent, CoAppRequest, PongEvent, StreamSelection } from '../../shared/protocol';
 
 const NATIVE_HOST = 'com.downy.coapp';
 
@@ -341,9 +341,14 @@ async function getOutDir(): Promise<string | undefined> {
   return (outDir as string).trim() || undefined;
 }
 
-async function startHlsJob(item: MediaItem, variantUrl?: string, variantLabel?: string): Promise<{ ok: boolean; error?: string }> {
+async function startHlsJob(
+  item: MediaItem,
+  variantUrl?: string,
+  variantLabel?: string,
+  streams: StreamSelection = 'both',
+): Promise<{ ok: boolean; error?: string }> {
   const jobId = crypto.randomUUID();
-  const filename = buildFilename(item, variantLabel);
+  const filename = buildFilename(item, variantLabel, streams);
   const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null };
   jobs.set(jobId, job);
   const res = sendToCoApp({
@@ -352,6 +357,7 @@ async function startHlsJob(item: MediaItem, variantUrl?: string, variantLabel?: 
     url: variantUrl ?? item.url,
     filename,
     outDir: await getOutDir(),
+    streams,
     headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
   });
   if (!res.ok) {
@@ -363,10 +369,10 @@ async function startHlsJob(item: MediaItem, variantUrl?: string, variantLabel?: 
   return res;
 }
 
-async function startDirectJob(item: MediaItem): Promise<{ ok: boolean; error?: string }> {
+async function startDirectJob(item: MediaItem, streams: StreamSelection = 'both'): Promise<{ ok: boolean; error?: string }> {
   const jobId = crypto.randomUUID();
-  const filename = buildFilename(item);
-  const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null, totalBytes: item.size };
+  const filename = buildFilename(item, undefined, streams);
+  const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null, totalBytes: streams === 'both' ? item.size : undefined };
   jobs.set(jobId, job);
   const res = sendToCoApp({
     type: 'download_direct',
@@ -374,6 +380,7 @@ async function startDirectJob(item: MediaItem): Promise<{ ok: boolean; error?: s
     url: item.url,
     filename,
     outDir: await getOutDir(),
+    streams,
     headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
   });
   if (!res.ok) {
@@ -385,7 +392,11 @@ async function startDirectJob(item: MediaItem): Promise<{ ok: boolean; error?: s
   return res;
 }
 
-async function startYtdlpJob(pageUrl: string, pageTitle?: string): Promise<{ ok: boolean; error?: string }> {
+async function startYtdlpJob(
+  pageUrl: string,
+  pageTitle?: string,
+  streams: StreamSelection = 'both',
+): Promise<{ ok: boolean; error?: string }> {
   const jobId = crypto.randomUUID();
   const job: JobInfo = {
     jobId,
@@ -394,7 +405,7 @@ async function startYtdlpJob(pageUrl: string, pageTitle?: string): Promise<{ ok:
     progress: null,
   };
   jobs.set(jobId, job);
-  const res = sendToCoApp({ type: 'download_ytdlp', jobId, pageUrl, outDir: await getOutDir() });
+  const res = sendToCoApp({ type: 'download_ytdlp', jobId, pageUrl, outDir: await getOutDir(), streams });
   if (!res.ok) {
     job.state = 'error';
     job.message = res.error;
@@ -448,7 +459,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         break;
       }
       case 'download-direct': {
-        sendResponse(await startDirectJob(msg.item as MediaItem));
+        sendResponse(await startDirectJob(msg.item as MediaItem, msg.streams as StreamSelection | undefined));
         break;
       }
       case 'download-hls': {
@@ -456,12 +467,17 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
           msg.item as MediaItem,
           msg.variantUrl as string | undefined,
           msg.variantLabel as string | undefined,
+          msg.streams as StreamSelection | undefined,
         );
         sendResponse(res);
         break;
       }
       case 'download-ytdlp': {
-        const res = await startYtdlpJob(msg.pageUrl as string, msg.pageTitle as string | undefined);
+        const res = await startYtdlpJob(
+          msg.pageUrl as string,
+          msg.pageTitle as string | undefined,
+          msg.streams as StreamSelection | undefined,
+        );
         sendResponse(res);
         break;
       }
