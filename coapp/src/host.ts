@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readMessages, sendMessage } from './nm';
-import type { CoAppRequest, DirectJobRequest, HlsJobRequest, JobEvent, YtdlpJobRequest } from '../../shared/protocol';
+import type { CoAppRequest, DirectJobRequest, HlsJobRequest, JobEvent, PickDirRequest, YtdlpJobRequest } from '../../shared/protocol';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 // __dirname указывает на coapp/dist после сборки
 const coappRoot = path.join(__dirname, '..');
@@ -300,6 +300,41 @@ function startYtdlp(req: YtdlpJobRequest): void {
   });
 }
 
+function pickDir(req: PickDirRequest): void {
+  // Диалог выбора папки — через PowerShell (WinForms). Асинхронно, чтобы
+  // не блокировать прогресс идущих загрузок, пока диалог открыт.
+  const script = [
+    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
+    "$f.Description = 'Папка загрузок Downy'",
+    '$f.ShowNewFolderButton = $true',
+    'if ($env:DOWNY_CURRENT_DIR -and (Test-Path -LiteralPath $env:DOWNY_CURRENT_DIR)) { $f.SelectedPath = $env:DOWNY_CURRENT_DIR }',
+    // TopMost-владелец, иначе диалог откроется позади браузера
+    '$w = New-Object System.Windows.Forms.Form',
+    '$w.TopMost = $true',
+    "if ($f.ShowDialog($w) -eq 'OK') { [Console]::Out.Write($f.SelectedPath) }",
+  ].join('; ');
+  const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-Command', script], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    windowsHide: true,
+    env: { ...process.env, DOWNY_CURRENT_DIR: req.current ?? '' },
+  });
+  let out = '';
+  child.stdout?.on('data', (d: Buffer) => {
+    out += d.toString('utf8');
+  });
+  child.on('error', (e) => {
+    log('pick_dir spawn error', e.message);
+    sendMessage({ type: 'pick_dir', reqId: req.reqId, dir: null });
+  });
+  child.on('close', () => {
+    const dir = out.trim() || null;
+    log('pick_dir result', dir ?? '(отмена)');
+    sendMessage({ type: 'pick_dir', reqId: req.reqId, dir });
+  });
+}
+
 function cancel(jobId: string): void {
   const job = jobs.get(jobId);
   if (!job) return;
@@ -320,7 +355,11 @@ readMessages((raw) => {
         version: VERSION,
         ffmpeg: binWorks(ffmpegPath, '-version'),
         ytdlp: binWorks(ytdlpPath, '--version'),
+        defaultOutDir,
       });
+      break;
+    case 'pick_dir':
+      pickDir(msg);
       break;
     case 'download_hls':
       startHls(msg);

@@ -164,6 +164,9 @@ footer {
 #ytdlp-page { width: 100%; }
 
 .field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.field-row { display: flex; gap: 6px; }
+.field-row input { flex: 1; min-width: 0; }
+.field-row button { flex: none; font-size: 12px; }
 .field input {
   font: inherit;
   padding: 5px 8px;

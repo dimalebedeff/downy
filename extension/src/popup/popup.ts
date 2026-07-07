@@ -220,14 +220,31 @@ async function init(): Promise<void> {
     renderJobs(res?.jobs ?? []);
   });
 
+  let defaultOutDir = '';
   const { outDir } = await chrome.storage.local.get({ outDir: '' });
   outDirInput.value = outDir as string;
   outDirInput.addEventListener('change', () => {
-    void chrome.storage.local.set({ outDir: outDirInput.value.trim() });
+    const v = outDirInput.value.trim();
+    void chrome.storage.local.set({ outDir: v });
+    // Пустое поле означает папку по умолчанию — показываем её полный путь
+    if (!v && defaultOutDir) outDirInput.value = defaultOutDir;
+  });
+
+  const browseBtn = $<HTMLButtonElement>('#browse-dir');
+  browseBtn.addEventListener('click', async () => {
+    browseBtn.disabled = true;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'pick-out-dir', current: outDirInput.value.trim() });
+      if (res?.dir) outDirInput.value = res.dir;
+    } finally {
+      browseBtn.disabled = false;
+    }
   });
 
   const status = await chrome.runtime.sendMessage({ type: 'coapp-status' });
   if (status?.ok) {
+    defaultOutDir = status.info?.defaultOutDir ?? '';
+    if (!outDirInput.value && defaultOutDir) outDirInput.value = defaultOutDir;
     coappStatusEl.className = 'status status-ok';
     const missing: string[] = [];
     if (!status.info?.ffmpeg) missing.push('ffmpeg');

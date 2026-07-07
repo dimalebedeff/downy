@@ -46,13 +46,36 @@ export interface PingRequest {
   type: 'ping';
 }
 
-export type CoAppRequest = HlsJobRequest | DirectJobRequest | YtdlpJobRequest | CancelRequest | PingRequest;
+/** Открыть нативный диалог выбора папки */
+export interface PickDirRequest {
+  type: 'pick_dir';
+  reqId: string;
+  /** Текущая папка — стартовая точка диалога */
+  current?: string;
+}
+
+export type CoAppRequest =
+  | HlsJobRequest
+  | DirectJobRequest
+  | YtdlpJobRequest
+  | CancelRequest
+  | PingRequest
+  | PickDirRequest;
 
 export interface PongEvent {
   type: 'pong';
   version: string;
   ffmpeg: boolean;
   ytdlp: boolean;
+  /** Папка сохранения по умолчанию (полный путь) */
+  defaultOutDir: string;
+}
+
+export interface PickDirEvent {
+  type: 'pick_dir';
+  reqId: string;
+  /** null — пользователь закрыл диалог без выбора */
+  dir: string | null;
 }
 
 export type JobState = 'running' | 'done' | 'error' | 'canceled';
@@ -71,4 +94,4 @@ export interface JobEvent {
   outFile?: string;
 }
 
-export type CoAppEvent = PongEvent | JobEvent;
+export type CoAppEvent = PongEvent | JobEvent | PickDirEvent;

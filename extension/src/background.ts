@@ -218,10 +218,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 let coappPort: chrome.runtime.Port | null = null;
 
+// Ожидающие ответы диалога выбора папки: reqId -> resolve
+const pendingPickDir = new Map<string, (dir: string | null) => void>();
+
 function getCoAppPort(): chrome.runtime.Port {
   if (coappPort) return coappPort;
   const port = chrome.runtime.connectNative(NATIVE_HOST);
   port.onMessage.addListener((msg: CoAppEvent) => {
+    if (msg.type === 'pick_dir') {
+      const resolve = pendingPickDir.get(msg.reqId);
+      pendingPickDir.delete(msg.reqId);
+      resolve?.(msg.dir);
+      return;
+    }
     if (msg.type !== 'job') return;
     const job = jobs.get(msg.jobId);
     if (!job) return;
@@ -237,6 +246,8 @@ function getCoAppPort(): chrome.runtime.Port {
   port.onDisconnect.addListener(() => {
     const err = chrome.runtime.lastError?.message;
     coappPort = null;
+    for (const resolve of pendingPickDir.values()) resolve(null);
+    pendingPickDir.clear();
     for (const job of jobs.values()) {
       if (job.state === 'running' || job.state === 'starting') {
         job.state = 'error';
@@ -434,6 +445,25 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
       }
       case 'coapp-status': {
         sendResponse(await pingCoApp());
+        break;
+      }
+      case 'pick-out-dir': {
+        const reqId = crypto.randomUUID();
+        const dir = await new Promise<string | null>((resolve) => {
+          pendingPickDir.set(reqId, resolve);
+          const sent = sendToCoApp({ type: 'pick_dir', reqId, current: msg.current as string | undefined });
+          if (!sent.ok) {
+            pendingPickDir.delete(reqId);
+            resolve(null);
+          }
+          // Страховка: если CoApp так и не ответил, не держим промис вечно
+          setTimeout(() => {
+            if (pendingPickDir.delete(reqId)) resolve(null);
+          }, 300_000);
+        });
+        // Сохраняем в фоне: выбор не потеряется, даже если попап уже закрыт
+        if (dir) await chrome.storage.local.set({ outDir: dir });
+        sendResponse({ ok: true, dir });
         break;
       }
       default:
