@@ -319,6 +319,28 @@ async function startHlsJob(item: MediaItem, variantUrl?: string, variantLabel?: 
   return res;
 }
 
+async function startDirectJob(item: MediaItem): Promise<{ ok: boolean; error?: string }> {
+  const jobId = crypto.randomUUID();
+  const filename = buildFilename(item);
+  const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null, totalBytes: item.size };
+  jobs.set(jobId, job);
+  const res = sendToCoApp({
+    type: 'download_direct',
+    jobId,
+    url: item.url,
+    filename,
+    outDir: await getOutDir(),
+    headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
+  });
+  if (!res.ok) {
+    job.state = 'error';
+    job.message = res.error;
+  }
+  persist();
+  broadcastJobs();
+  return res;
+}
+
 async function startYtdlpJob(pageUrl: string, pageTitle?: string): Promise<{ ok: boolean; error?: string }> {
   const jobId = crypto.randomUUID();
   const job: JobInfo = {
@@ -381,13 +403,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         break;
       }
       case 'download-direct': {
-        const item = msg.item as MediaItem;
-        try {
-          await chrome.downloads.download({ url: item.url, filename: `downy/${buildFilename(item)}` });
-          sendResponse({ ok: true });
-        } catch (e) {
-          sendResponse({ ok: false, error: e instanceof Error ? e.message : String(e) });
-        }
+        sendResponse(await startDirectJob(msg.item as MediaItem));
         break;
       }
       case 'download-hls': {

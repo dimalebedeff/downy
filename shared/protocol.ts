@@ -15,6 +15,21 @@ export interface HlsJobRequest {
   };
 }
 
+export interface DirectJobRequest {
+  type: 'download_direct';
+  jobId: string;
+  /** Прямой URL файла (mp4/webm/mp3 и т.п.) */
+  url: string;
+  /** Имя файла с расширением, уже безопасное для файловой системы */
+  filename: string;
+  /** Папка сохранения; пусто — Downloads\downy */
+  outDir?: string;
+  headers?: {
+    referer?: string;
+    userAgent?: string;
+  };
+}
+
 export interface YtdlpJobRequest {
   type: 'download_ytdlp';
   jobId: string;
@@ -31,7 +46,7 @@ export interface PingRequest {
   type: 'ping';
 }
 
-export type CoAppRequest = HlsJobRequest | YtdlpJobRequest | CancelRequest | PingRequest;
+export type CoAppRequest = HlsJobRequest | DirectJobRequest | YtdlpJobRequest | CancelRequest | PingRequest;
 
 export interface PongEvent {
   type: 'pong';

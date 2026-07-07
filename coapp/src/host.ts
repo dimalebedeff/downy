@@ -1,9 +1,10 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readMessages, sendMessage } from './nm';
-import type { CoAppRequest, HlsJobRequest, JobEvent, YtdlpJobRequest } from '../../shared/protocol';
+import type { CoAppRequest, DirectJobRequest, HlsJobRequest, JobEvent, YtdlpJobRequest } from '../../shared/protocol';
 
 const VERSION = '0.1.0';
 
@@ -55,11 +56,30 @@ function uniquePath(dir: string, filename: string): string {
 }
 
 interface RunningJob {
-  child: ChildProcess;
   canceled: boolean;
+  kill(): void;
 }
 
 const jobs = new Map<string, RunningJob>();
+
+function processJob(child: ChildProcess): RunningJob {
+  return {
+    canceled: false,
+    kill() {
+      const pid = child.pid;
+      if (pid) {
+        // yt-dlp порождает ffmpeg — убиваем всё дерево процессов
+        try {
+          spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true });
+          return;
+        } catch {
+          // ниже — фолбэк
+        }
+      }
+      child.kill();
+    },
+  };
+}
 
 function emit(event: JobEvent): void {
   sendMessage(event);
@@ -95,7 +115,7 @@ function startHls(req: HlsJobRequest): void {
 
   log('ffmpeg start', req.jobId, req.url, '->', outFile);
   const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-  const job: RunningJob = { child, canceled: false };
+  const job = processJob(child);
   jobs.set(req.jobId, job);
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
 
@@ -147,6 +167,72 @@ function startHls(req: HlsJobRequest): void {
   });
 }
 
+async function startDirect(req: DirectJobRequest): Promise<void> {
+  let outFile: string;
+  try {
+    const outDir = resolveOutDir(req.outDir);
+    outFile = uniquePath(outDir, req.filename);
+  } catch (e) {
+    emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: String(e) });
+    return;
+  }
+
+  const ac = new AbortController();
+  const job: RunningJob = { canceled: false, kill: () => ac.abort() };
+  jobs.set(req.jobId, job);
+  emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
+  log('direct start', req.jobId, req.url, '->', outFile);
+
+  const headers: Record<string, string> = {};
+  if (req.headers?.referer) headers.Referer = req.headers.referer;
+  if (req.headers?.userAgent) headers['User-Agent'] = req.headers.userAgent;
+
+  let out: fs.WriteStream | null = null;
+  try {
+    const resp = await fetch(req.url, { headers, signal: ac.signal, redirect: 'follow' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+    if (!resp.body) throw new Error('пустой ответ сервера');
+    const totalBytes = Number(resp.headers.get('content-length')) || undefined;
+    out = fs.createWriteStream(outFile);
+    let bytes = 0;
+    let lastSent = 0;
+    for await (const chunk of resp.body) {
+      const buf = Buffer.from(chunk as Uint8Array);
+      bytes += buf.length;
+      if (!out.write(buf)) await once(out, 'drain');
+      const now = Date.now();
+      if (now - lastSent >= 1000) {
+        lastSent = now;
+        emit({
+          type: 'job',
+          jobId: req.jobId,
+          state: 'running',
+          progress: totalBytes ? Math.min(0.999, bytes / totalBytes) : null,
+          bytes,
+          totalBytes,
+        });
+      }
+    }
+    await new Promise<void>((resolve, reject) => out!.end((err?: Error | null) => (err ? reject(err) : resolve())));
+    jobs.delete(req.jobId);
+    log('direct done', req.jobId, bytes, 'bytes');
+    emit({ type: 'job', jobId: req.jobId, state: 'done', progress: 1, bytes, totalBytes, outFile });
+  } catch (e) {
+    jobs.delete(req.jobId);
+    if (out) out.destroy();
+    // недокачанный файл бесполезен — убираем и при отмене, и при ошибке
+    fs.rm(outFile, { force: true }, () => {});
+    if (job.canceled) {
+      log('direct canceled', req.jobId);
+      emit({ type: 'job', jobId: req.jobId, state: 'canceled', progress: null });
+    } else {
+      const msg = e instanceof Error ? e.message : String(e);
+      log('direct error', req.jobId, msg);
+      emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: msg });
+    }
+  }
+}
+
 function startYtdlp(req: YtdlpJobRequest): void {
   let outDir: string;
   try {
@@ -162,7 +248,7 @@ function startYtdlp(req: YtdlpJobRequest): void {
 
   log('yt-dlp start', req.jobId, req.pageUrl);
   const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-  const job: RunningJob = { child, canceled: false };
+  const job = processJob(child);
   jobs.set(req.jobId, job);
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
 
@@ -218,18 +304,8 @@ function cancel(jobId: string): void {
   const job = jobs.get(jobId);
   if (!job) return;
   job.canceled = true;
-  const pid = job.child.pid;
-  log('cancel', jobId, 'pid', pid);
-  if (pid) {
-    // yt-dlp порождает ffmpeg — убиваем всё дерево процессов
-    try {
-      spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true });
-      return;
-    } catch {
-      // ниже — фолбэк
-    }
-  }
-  job.child.kill();
+  log('cancel', jobId);
+  job.kill();
 }
 
 process.on('uncaughtException', (e) => log('uncaught', e.stack ?? e.message));
@@ -248,6 +324,9 @@ readMessages((raw) => {
       break;
     case 'download_hls':
       startHls(msg);
+      break;
+    case 'download_direct':
+      void startDirect(msg);
       break;
     case 'download_ytdlp':
       startYtdlp(msg);
