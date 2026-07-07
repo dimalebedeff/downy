@@ -2,7 +2,7 @@
   "name": "downy",
   "private": true,
   "version": "0.1.0",
-  "description": "Детект и скачивание видео/аудио со страниц браузера (аналог Video DownloadHelper)",
+  "description": "Расширение для скачивания видео и аудио с любых сайтов",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
