@@ -43,19 +43,32 @@ function itemTitle(item: MediaItem): string {
   }
 }
 
-// ---------- Статус помощника ----------
+// ---------- Индикатор: зелёный — есть что качать, серый — пусто, красный — беда ----------
 
-function setStatus(kind: 'ok' | 'warn' | 'err' | 'unknown', text: string): void {
+let coappOk: boolean | null = null; // null — ещё проверяем
+let hardError = false;
+let lastHasMedia = false;
+
+function refreshDot(): void {
+  const kind = hardError || coappOk === false ? 'err' : coappOk && lastHasMedia ? 'ok' : 'unknown';
   statusDot.className = `dot dot-${kind}`;
-  statusDot.title = kind === 'ok' ? 'Помощник на связи' : 'Состояние помощника — нажми';
-  statusBanner.textContent = text;
-  statusBanner.classList.toggle('err', kind === 'err');
+  statusDot.title =
+    kind === 'ok' ? 'Медиа найдено, помощник на связи'
+    : kind === 'err' ? 'Что-то не работает — нажми'
+    : 'Медиа на вкладке пока нет';
 }
 
-/** Ошибка действия пользователя — показываем сразу, а не только точкой. */
+function setBanner(text: string, isErr: boolean, show: boolean): void {
+  statusBanner.textContent = text;
+  statusBanner.classList.toggle('err', isErr);
+  if (show) statusBanner.hidden = false;
+}
+
+/** Настоящая поломка — красная точка и пояснение выскакивает само. */
 function showError(text: string): void {
-  setStatus('err', text);
-  statusBanner.hidden = false;
+  hardError = true;
+  setBanner(text, true, true);
+  refreshDot();
 }
 
 // ---------- Сопоставление карточка ↔ загрузка ----------
@@ -115,6 +128,8 @@ document.addEventListener('keydown', (e) => {
 function renderMedia(): void {
   const groups = groupMediaItems(lastItems);
   emptyEl.hidden = groups.length > 0;
+  lastHasMedia = groups.length > 0;
+  refreshDot();
 
   // yt-dlp: звезда пустого экрана, скромная строчка — когда медиа есть
   if (groups.length === 0) {
@@ -561,16 +576,17 @@ async function init(): Promise<void> {
     if (!status.info?.ffmpeg) missing.push('ffmpeg');
     if (!status.info?.ytdlp) missing.push('yt-dlp');
     if (missing.length) {
-      setStatus('warn', `Помощник работает, но не хватает: ${missing.join(', ')}.\nЗапусти npm run coapp:fetch-bins в папке Downy.`);
+      coappOk = false;
+      setBanner(`Помощник работает, но не хватает: ${missing.join(', ')}.\nЗапусти npm run coapp:fetch-bins в папке Downy.`, true, true);
     } else {
-      setStatus('ok', `Помощник Downy v${status.info?.version} на связи — ffmpeg и yt-dlp на месте.`);
+      coappOk = true;
+      setBanner(`Помощник Downy v${status.info?.version} на связи — ffmpeg и yt-dlp на месте.`, false, false);
     }
   } else {
-    setStatus('err', `Помощник не отвечает — скачивание работать не будет.\nУстанови его: npm run coapp:install.\n${status?.error ?? ''}`.trim());
+    coappOk = false;
+    setBanner(`Помощник не отвечает — скачивание работать не будет.\nУстанови его: npm run coapp:install.\n${status?.error ?? ''}`.trim(), true, true);
   }
-  // Пустая вкладка — не повод для баннера: беду показываем сразу,
-  // только когда тут есть что качать. Точка и клик по ней работают всегда.
-  if (!status?.ok && lastItems.length > 0) statusBanner.hidden = false;
+  refreshDot();
 }
 
 void init();

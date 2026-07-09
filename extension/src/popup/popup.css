@@ -101,7 +101,6 @@ h2 {
 }
 .dot-unknown { background: var(--muted); }
 .dot-ok { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, .55); }
-.dot-warn { background: var(--accent); box-shadow: 0 0 6px var(--glow); }
 .dot-err { background: var(--err); box-shadow: 0 0 6px rgba(220, 38, 38, .55); }
 
 .icon-btn {
