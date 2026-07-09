@@ -69,15 +69,18 @@ body {
 /* ---------- Шапка ---------- */
 
 header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
 }
 
-.brand { display: flex; align-items: center; gap: 7px; }
-
+/* Название по центру шапки; точка и шестерёнка — по краям */
 h1 {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 16px;
   font-weight: 800;
   letter-spacing: -.02em;
@@ -300,32 +303,52 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 .job-line { display: flex; align-items: center; gap: 8px; margin-top: auto; }
 
 .bar {
+  position: relative;
   flex: 1;
   height: 6px;
   border-radius: 999px;
   background: var(--chip);
-  overflow: hidden;
 }
-.bar.live { animation: breathe 1.8s ease-in-out infinite; }
 
 .bar-fill {
+  position: relative;
   height: 100%;
   border-radius: 999px;
   background: var(--accent);
-  transition: width .4s ease;
+  /* 1s linear — под темп событий хоста: полоска едет непрерывно */
+  transition: width 1s linear;
 }
-.bar-fill.indeterminate { width: 35%; animation: slide 1.3s ease-in-out infinite; }
 
-@keyframes breathe {
-  0%, 100% { box-shadow: 0 0 4px 0 var(--glow); }
-  50% { box-shadow: 0 0 13px 3px var(--glow); }
+/* Комета: свечение на фронте загрузки, мягко дышит */
+.bar-fill::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent) 15%, var(--glow) 45%, transparent 72%);
+  animation: comet 3.2s ease-in-out infinite;
+}
+
+.bar-fill.indeterminate {
+  width: 35%;
+  transition: none;
+  animation: slide 1.4s ease-in-out infinite alternate;
+}
+.bar-fill.indeterminate::after { display: none; }
+
+@keyframes comet {
+  0%, 100% { opacity: .5; transform: translateY(-50%) scale(.8); }
+  50% { opacity: 1; transform: translateY(-50%) scale(1.15); }
 }
 @keyframes slide {
-  0% { transform: translateX(-110%); }
-  100% { transform: translateX(310%); }
+  from { transform: translateX(0); }
+  to { transform: translateX(185%); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bar.live { animation: none; box-shadow: 0 0 6px 1px var(--glow); }
+  .bar-fill::after { animation: none; opacity: .8; transform: translateY(-50%); }
   .bar-fill.indeterminate { animation: none; width: 100%; opacity: .45; }
 }
 

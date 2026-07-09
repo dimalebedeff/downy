@@ -4,6 +4,7 @@ import { fmtSize, jobProgressView } from '../lib/progress';
 import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
+import { diffJobs } from '../lib/jobs-diff';
 
 type MediaGroup = ReturnType<typeof groupMediaItems>[number];
 
@@ -34,6 +35,26 @@ let pageThumb: string | undefined;
 let pageVideo: PageVideo | undefined;
 let lastItems: MediaItem[] = [];
 let lastJobs: JobInfo[] = [];
+
+// Живые шкалы: jobId → элементы, которые обновляем на месте без перерисовки,
+// иначе CSS-переход ширины не срабатывает и полоска дёргается скачками
+const liveBars = new Map<string, { fill: HTMLDivElement; label: HTMLElement }>();
+// Перерисовку отложили (открыт кебаб) — догоним на ближайшем поллинге
+let needsRender = false;
+
+function updateJobProgress(job: JobInfo): void {
+  const el = liveBars.get(job.jobId);
+  if (!el) return;
+  const { text, ratio } = jobProgressView(job);
+  el.label.textContent = text;
+  if (ratio != null) {
+    el.fill.classList.remove('indeterminate');
+    el.fill.style.width = `${(ratio * 100).toFixed(2)}%`;
+  } else if (!el.fill.classList.contains('indeterminate')) {
+    el.fill.style.width = '';
+    el.fill.classList.add('indeterminate');
+  }
+}
 
 function fmtDuration(sec?: number): string {
   if (!sec) return '';
@@ -139,6 +160,8 @@ document.addEventListener('keydown', (e) => {
 // ---------- Карточки медиа ----------
 
 function renderMedia(): void {
+  needsRender = false;
+  liveBars.clear();
   // SPA меняет ролики без перезагрузки — старьё с прошлых адресов не показываем
   const groups = groupMediaItems(filterPageItems(lastItems, activeTab?.url));
   // Страница с MSE-видео (ютуб и ко) — своя карточка, если больше ничего не поймали
@@ -266,11 +289,6 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
   title.title = pv.url;
   body.append(title);
 
-  const meta = document.createElement('div');
-  meta.className = 'card-meta';
-  meta.textContent = 'Видео на странице · скачаю через yt-dlp';
-  body.append(meta);
-
   if (job && (job.state === 'running' || job.state === 'starting')) {
     body.append(jobLine(job));
   } else if (job && job.state === 'done') {
@@ -395,17 +413,18 @@ function jobLine(job: JobInfo): HTMLDivElement {
   line.className = 'job-line';
 
   const bar = document.createElement('div');
-  bar.className = 'bar live';
+  bar.className = 'bar';
   const fill = document.createElement('div');
   fill.className = 'bar-fill';
   const { text, ratio } = jobProgressView(job);
-  if (ratio != null) fill.style.width = `${Math.round(ratio * 100)}%`;
+  if (ratio != null) fill.style.width = `${(ratio * 100).toFixed(2)}%`;
   else fill.classList.add('indeterminate');
   bar.append(fill);
 
   const label = document.createElement('span');
   label.className = 'job-text';
   label.textContent = text;
+  liveBars.set(job.jobId, { fill, label });
 
   const cancel = document.createElement('button');
   cancel.className = 'cancel-btn';
@@ -583,14 +602,15 @@ function renderTailJobs(jobs: JobInfo[]): void {
 
     if (job.state === 'running' || job.state === 'starting') {
       const bar = document.createElement('div');
-      bar.className = 'bar live';
+      bar.className = 'bar';
       const fill = document.createElement('div');
       fill.className = 'bar-fill';
       const { ratio } = jobProgressView(job);
-      if (ratio != null) fill.style.width = `${Math.round(ratio * 100)}%`;
+      if (ratio != null) fill.style.width = `${(ratio * 100).toFixed(2)}%`;
       else fill.classList.add('indeterminate');
       bar.append(fill);
       li.append(bar);
+      liveBars.set(job.jobId, { fill, label: state });
     }
 
     if (job.state === 'error' && job.message) {
@@ -606,14 +626,26 @@ function renderTailJobs(jobs: JobInfo[]): void {
 
 // ---------- Инициализация ----------
 
+let mediaSnapshot = '';
+
 async function refresh(): Promise<void> {
   if (activeTab?.id == null) return;
   const res = await chrome.runtime.sendMessage({ type: 'get-media', tabId: activeTab.id });
   pageThumb = res?.pageThumb;
   pageVideo = res?.pageVideo;
   lastItems = res?.items ?? [];
-  lastJobs = res?.jobs ?? [];
-  renderMedia();
+  const jobs: JobInfo[] = res?.jobs ?? [];
+  const jobsKind = diffJobs(lastJobs, jobs);
+  lastJobs = jobs;
+  // Перерисовка стирает CSS-переходы и мигает превью — делаем её только
+  // когда реально изменился состав карточек, а не цифры прогресса
+  const snap = JSON.stringify([pageThumb, pageVideo, lastItems]);
+  if (snap !== mediaSnapshot || jobsKind === 'structural' || needsRender) {
+    mediaSnapshot = snap;
+    renderMedia();
+  } else if (jobsKind === 'progress') {
+    for (const j of jobs) updateJobProgress(j);
+  }
 }
 
 async function init(): Promise<void> {
@@ -622,8 +654,15 @@ async function init(): Promise<void> {
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === 'jobs-updated') {
-      lastJobs = msg.jobs ?? [];
-      if (kebabMenu.hidden) renderMedia();
+      const jobs: JobInfo[] = msg.jobs ?? [];
+      const kind = diffJobs(lastJobs, jobs);
+      lastJobs = jobs;
+      if (kind === 'progress') {
+        for (const j of jobs) updateJobProgress(j);
+      } else if (kind === 'structural') {
+        if (kebabMenu.hidden) renderMedia();
+        else needsRender = true;
+      }
     }
     if (msg?.type === 'update-progress') onUpdateProgress(msg.state, msg.message);
   });
