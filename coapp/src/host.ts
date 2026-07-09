@@ -10,7 +10,10 @@ import type {
   HlsJobRequest,
   JobEvent,
   PickDirRequest,
+  ProbeFormat,
+  ProbeRequest,
   StreamSelection,
+  ThumbnailJobRequest,
   ThumbRequest,
   UpdateRequest,
   YtdlpJobRequest,
@@ -440,6 +443,20 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
   }
 }
 
+/** Локальная дата скачивания для имени файла: 2026-07-10 */
+function localDateStamp(date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
+}
+
+/** Формат-строка yt-dlp: предпочитаем mp4/m4a, качество не выше maxHeight */
+function ytdlpFormatArgs(streams: StreamSelection, maxHeight?: number): string[] {
+  const h = maxHeight ? `[height<=${maxHeight}]` : '';
+  if (streams === 'video') return ['-f', `bestvideo${h}[ext=mp4]/bestvideo${h}/best${h}`];
+  if (streams === 'audio') return ['-f', 'bestaudio[ext=m4a]/bestaudio/best'];
+  return ['-f', `bestvideo${h}[ext=mp4]+bestaudio[ext=m4a]/bestvideo${h}+bestaudio/best${h}`];
+}
+
 function startYtdlp(req: YtdlpJobRequest): void {
   let outDir: string;
   try {
@@ -449,32 +466,41 @@ function startYtdlp(req: YtdlpJobRequest): void {
     return;
   }
 
-  // Суффикс в имени — иначе аудио/видео-версии совпали бы по имени с полной,
-  // и yt-dlp молча пропустил бы скачивание («has already been downloaded»)
-  const nameSuffix = { both: '', video: ' [видео]', audio: ' [аудио]' }[req.streams ?? 'both'];
+  const streams = req.streams ?? 'both';
   const args = [
-    ...YTDLP_COMMON_ARGS, '--no-playlist', '--force-overwrites',
+    ...YTDLP_COMMON_ARGS, '--no-playlist',
     '--concurrent-fragments', HLS_CONCURRENCY,
-    '-P', outDir, '-o', `%(title).120s [%(id)s]${nameSuffix}.%(ext)s`,
   ];
+  let presetOutFile = '';
+  if (req.filenameStem) {
+    // Имя собрано расширением — защищаем от перезаписи как все загрузки
+    presetOutFile = uniquePath(outDir, req.filenameStem + (streams === 'audio' ? '.m4a' : '.mp4'));
+    args.push('-o', presetOutFile);
+    // Контейнер в имени обещан — держим слово, даже если лучший кодек в webm
+    if (streams === 'both') args.push('--merge-output-format', 'mp4');
+    else if (streams === 'video') args.push('--remux-video', 'mp4');
+    else args.push('--remux-video', 'm4a');
+  } else {
+    // Разведка не прошла — yt-dlp именует сам; дата вместо мусорного айдишника,
+    // force-overwrites — иначе повторная закачка молча скипнется
+    const nameSuffix = { both: '', video: ' [видео]', audio: ' [аудио]' }[streams];
+    args.push('--force-overwrites', '-P', outDir, '-o', `%(title).120s${nameSuffix} [${localDateStamp()}].%(ext)s`);
+  }
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
-  // Предпочитаем mp4/m4a — их открывает всё; webm/opus только если иного нет
-  if (req.streams === 'video') args.push('-f', 'bestvideo[ext=mp4]/bestvideo/best');
-  else if (req.streams === 'audio') args.push('-f', 'bestaudio[ext=m4a]/bestaudio/best');
-  else args.push('-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best');
+  args.push(...ytdlpFormatArgs(streams, req.maxHeight));
   args.push(req.pageUrl);
 
-  log('yt-dlp start', req.jobId, req.pageUrl, 'streams:', req.streams ?? 'both');
+  log('yt-dlp start', req.jobId, req.pageUrl, 'streams:', streams, 'maxHeight:', req.maxHeight ?? 'best');
   const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   const job = processJob(child);
   jobs.set(req.jobId, job);
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
 
-  let outFile = '';
+  let outFile = presetOutFile;
   let errTail = '';
 
   child.stdout?.on('data', makeYtdlpStdoutHandler(req.jobId, (f) => {
-    outFile = f;
+    if (!presetOutFile) outFile = f;
   }));
 
   child.stderr?.on('data', (d: Buffer) => {
@@ -489,6 +515,122 @@ function startYtdlp(req: YtdlpJobRequest): void {
 
   child.on('close', (code) => {
     log('yt-dlp exit', req.jobId, code, 'canceled:', job.canceled);
+    jobDone(req.jobId, code, job.canceled, outFile, errTail);
+  });
+}
+
+// ---------- Разведка форматов (yt-dlp -J) ----------
+
+const PROBE_TIMEOUT_MS = 30_000;
+
+interface YtdlpJsonFormat {
+  height?: number | null;
+  fps?: number | null;
+  vcodec?: string | null;
+  acodec?: string | null;
+  filesize?: number | null;
+  filesize_approx?: number | null;
+}
+
+function probe(req: ProbeRequest): void {
+  const args = [...YTDLP_COMMON_ARGS, '--no-playlist', '-J', req.pageUrl];
+  log('probe start', req.reqId, req.pageUrl);
+  const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+
+  const chunks: Buffer[] = [];
+  let errTail = '';
+  let finished = false;
+  const finish = (payload: { ok: boolean; error?: string; title?: string; thumbnailUrl?: string; formats?: ProbeFormat[] }): void => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    sendMessage({ type: 'probe', reqId: req.reqId, ...payload });
+  };
+  const timer = setTimeout(() => {
+    log('probe timeout', req.pageUrl);
+    child.kill('SIGKILL');
+    finish({ ok: false, error: 'Разведка форматов не уложилась в 30 секунд' });
+  }, PROBE_TIMEOUT_MS);
+
+  child.stdout?.on('data', (d: Buffer) => chunks.push(d));
+  child.stderr?.on('data', (d: Buffer) => {
+    errTail = (errTail + d.toString()).slice(-1000);
+  });
+  child.on('error', (e) => finish({ ok: false, error: `Не удалось запустить yt-dlp: ${e.message}` }));
+  child.on('close', (code) => {
+    if (code !== 0) {
+      log('probe failed', req.reqId, code, errTail.slice(-300));
+      finish({ ok: false, error: errTail.slice(-500) || `yt-dlp: exit code ${code}` });
+      return;
+    }
+    try {
+      const info = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+        title?: string;
+        thumbnail?: string;
+        formats?: YtdlpJsonFormat[];
+      };
+      const formats: ProbeFormat[] = (info.formats ?? []).map((f) => ({
+        height: f.height ?? undefined,
+        fps: f.fps ?? undefined,
+        hasVideo: !!f.vcodec && f.vcodec !== 'none',
+        hasAudio: !!f.acodec && f.acodec !== 'none',
+        sizeBytes: f.filesize ?? f.filesize_approx ?? undefined,
+      }));
+      log('probe done', req.reqId, formats.length, 'formats');
+      finish({ ok: true, title: info.title, thumbnailUrl: info.thumbnail, formats });
+    } catch (e) {
+      finish({ ok: false, error: `Разбор ответа yt-dlp: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+}
+
+// ---------- Обложка страницы ----------
+
+function startThumbnail(req: ThumbnailJobRequest): void {
+  let outFile: string;
+  let stemPath: string;
+  try {
+    const outDir = resolveOutDir(req.outDir);
+    outFile = uniquePath(outDir, `${req.filenameStem}.jpg`);
+    stemPath = outFile.slice(0, -4); // без .jpg — расширение допишет yt-dlp
+  } catch (e) {
+    emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: String(e) });
+    return;
+  }
+
+  const args = [
+    ...YTDLP_COMMON_ARGS, '--no-playlist', '--skip-download',
+    '--write-thumbnail', '--convert-thumbnails', 'jpg',
+    '-o', `thumbnail:${stemPath}.%(ext)s`,
+  ];
+  if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
+  args.push(req.pageUrl);
+
+  log('thumbnail start', req.jobId, req.pageUrl, '->', outFile);
+  const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+  const job = processJob(child);
+  jobs.set(req.jobId, job);
+  emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
+
+  let errTail = '';
+  child.stderr?.on('data', (d: Buffer) => {
+    errTail = (errTail + d.toString()).slice(-2000);
+  });
+  child.on('error', (e) => {
+    jobs.delete(req.jobId);
+    emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: `Не удалось запустить yt-dlp: ${e.message}` });
+  });
+  child.on('close', (code) => {
+    log('thumbnail exit', req.jobId, code, 'canceled:', job.canceled);
+    // Конвертер мог оставить исходник (.webp) рядом — не мусорим
+    for (const ext of ['webp', 'png']) {
+      fs.rm(`${stemPath}.${ext}`, { force: true }, () => {});
+    }
+    if (!job.canceled && code === 0 && !fs.existsSync(outFile)) {
+      jobs.delete(req.jobId);
+      emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: 'У страницы не нашлось обложки' });
+      return;
+    }
     jobDone(req.jobId, code, job.canceled, outFile, errTail);
   });
 }
@@ -768,6 +910,12 @@ readMessages((raw) => {
       break;
     case 'download_ytdlp':
       startYtdlp(msg);
+      break;
+    case 'download_thumbnail':
+      startThumbnail(msg);
+      break;
+    case 'probe':
+      probe(msg);
       break;
     case 'cancel':
       cancel(msg.jobId);

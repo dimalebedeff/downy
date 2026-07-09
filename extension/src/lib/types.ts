@@ -1,5 +1,12 @@
 import type { HlsVariant } from './m3u8';
 import type { MediaKind } from './media-detect';
+import type { ProbeFormat } from '../../../shared/protocol';
+
+/** Состояние разведки форматов страницы (yt-dlp -J), кешируется в фоне */
+export type ProbeState =
+  | { status: 'pending' }
+  | { status: 'ready'; title?: string; thumbnailUrl?: string; formats: ProbeFormat[] }
+  | { status: 'error'; error?: string };
 
 export interface MediaItem {
   /** Ключ — сам URL */

@@ -1,10 +1,11 @@
-import type { JobInfo, MediaItem } from '../lib/types';
+import type { JobInfo, MediaItem, ProbeState } from '../lib/types';
 import type { StreamSelection } from '../../../shared/protocol';
 import { fmtSize, jobProgressView } from '../lib/progress';
 import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
 import { diffJobs } from '../lib/jobs-diff';
+import { qualityOptions } from '../lib/ytdlp-formats';
 
 type MediaGroup = ReturnType<typeof groupMediaItems>[number];
 
@@ -33,6 +34,7 @@ interface PageVideo {
 let activeTab: chrome.tabs.Tab | undefined;
 let pageThumb: string | undefined;
 let pageVideo: PageVideo | undefined;
+let pageProbe: ProbeState | undefined;
 let lastItems: MediaItem[] = [];
 let lastJobs: JobInfo[] = [];
 
@@ -283,9 +285,11 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
   const body = document.createElement('div');
   body.className = 'card-body';
 
+  const probeReady = pageProbe?.status === 'ready' ? pageProbe : undefined;
+
   const title = document.createElement('div');
   title.className = 'card-title';
-  title.textContent = pv.title?.trim() || pv.url;
+  title.textContent = probeReady?.title?.trim() || pv.title?.trim() || pv.url;
   title.title = pv.url;
   body.append(title);
 
@@ -304,6 +308,23 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
     const row = document.createElement('div');
     row.className = 'card-actions';
 
+    // Выбор качества из разведки; пока она едет — «Лучшее» работает сразу
+    const select = document.createElement('select');
+    select.title = 'Качество';
+    select.append(new Option('Лучшее', ''));
+    if (probeReady) {
+      for (const q of qualityOptions(probeReady.formats)) {
+        const opt = new Option(q.label, String(q.maxHeight));
+        // В имя файла идёт «1080p60», без веса
+        opt.dataset.q = q.label.split(' · ')[0];
+        select.append(opt);
+      }
+    } else if (pageProbe?.status === 'pending') {
+      const opt = new Option('узнаю качества…', '');
+      opt.disabled = true;
+      select.append(opt);
+    }
+
     const btn = document.createElement('button');
     btn.className = 'primary';
     btn.textContent = 'Скачать';
@@ -314,6 +335,8 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
         pageUrl: pv.url,
         pageTitle: pv.title,
         streams,
+        maxHeight: select.value ? Number(select.value) : undefined,
+        qualityLabel: select.selectedOptions[0]?.dataset.q,
       });
       if (!res?.ok) showError(res?.error ?? 'Помощник недоступен');
       setTimeout(() => (btn.disabled = false), 1500);
@@ -328,11 +351,17 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
       openKebab(kebab, [
         { label: 'Скачать только видео', run: () => void start('video') },
         { label: 'Скачать только звук', run: () => void start('audio') },
+        {
+          label: 'Скачать обложку',
+          run: () => {
+            void chrome.runtime.sendMessage({ type: 'download-thumb-ytdlp', pageUrl: pv.url, pageTitle: pv.title });
+          },
+        },
         { label: 'Копировать ссылку', run: () => void navigator.clipboard.writeText(pv.url) },
       ]);
     });
 
-    row.append(btn, kebab);
+    row.append(btn, select, kebab);
     body.append(row);
   }
 
@@ -393,6 +422,29 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
         { label: 'Скачать только видео', run: () => start('video') },
         { label: 'Скачать только звук', run: () => start('audio') },
       );
+    }
+    // Обложка — только настоящая картинка (poster/og:image); наш 192px-кадр
+    // из ffmpeg за обложку не выдаём
+    const coverUrl = [item.thumb, pageThumb].find((u) => u?.startsWith('http'));
+    if (coverUrl) {
+      actions.push({
+        label: 'Скачать обложку',
+        run: () => {
+          void chrome.runtime.sendMessage({
+            type: 'download-direct',
+            item: {
+              url: coverUrl,
+              kind: 'direct',
+              tabId: item.tabId,
+              foundAt: Date.now(),
+              pageUrl: item.pageUrl,
+              pageTitle: `${itemTitle(item)} [обложка]`,
+              contentType: 'image/jpeg',
+            },
+            streams: 'both',
+          });
+        },
+      });
     }
     actions.push({
       label: 'Копировать ссылку',
@@ -633,13 +685,14 @@ async function refresh(): Promise<void> {
   const res = await chrome.runtime.sendMessage({ type: 'get-media', tabId: activeTab.id });
   pageThumb = res?.pageThumb;
   pageVideo = res?.pageVideo;
+  pageProbe = res?.probe;
   lastItems = res?.items ?? [];
   const jobs: JobInfo[] = res?.jobs ?? [];
   const jobsKind = diffJobs(lastJobs, jobs);
   lastJobs = jobs;
   // Перерисовка стирает CSS-переходы и мигает превью — делаем её только
   // когда реально изменился состав карточек, а не цифры прогресса
-  const snap = JSON.stringify([pageThumb, pageVideo, lastItems]);
+  const snap = JSON.stringify([pageThumb, pageVideo, pageProbe, lastItems]);
   if (snap !== mediaSnapshot || jobsKind === 'structural' || needsRender) {
     mediaSnapshot = snap;
     renderMedia();

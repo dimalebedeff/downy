@@ -45,6 +45,51 @@ export interface YtdlpJobRequest {
   outDir?: string;
   /** По умолчанию 'both' */
   streams?: StreamSelection;
+  /**
+   * Имя файла без расширения (уже безопасное). Задано — хост сам подберёт
+   * контейнер (.mp4/.m4a) и защитит от перезаписи как uniquePath;
+   * не задано — yt-dlp именует по своему шаблону.
+   */
+  filenameStem?: string;
+  /** Планка качества: не выше этой высоты (720, 1080, …). Нет — лучшее. */
+  maxHeight?: number;
+}
+
+/** Скачать только обложку страницы (yt-dlp --write-thumbnail, конверт в jpg) */
+export interface ThumbnailJobRequest {
+  type: 'download_thumbnail';
+  jobId: string;
+  pageUrl: string;
+  /** Имя файла без расширения, уже безопасное */
+  filenameStem: string;
+  outDir?: string;
+}
+
+/** Разведка форматов страницы: yt-dlp -J */
+export interface ProbeRequest {
+  type: 'probe';
+  reqId: string;
+  pageUrl: string;
+}
+
+/** Один формат из разведки — только то, что нужно для выбора качества */
+export interface ProbeFormat {
+  height?: number;
+  fps?: number;
+  hasVideo: boolean;
+  hasAudio: boolean;
+  /** Точный или примерный размер в байтах */
+  sizeBytes?: number;
+}
+
+export interface ProbeEvent {
+  type: 'probe';
+  reqId: string;
+  ok: boolean;
+  error?: string;
+  title?: string;
+  thumbnailUrl?: string;
+  formats?: ProbeFormat[];
 }
 
 export interface CancelRequest {
@@ -93,6 +138,8 @@ export type CoAppRequest =
   | HlsJobRequest
   | DirectJobRequest
   | YtdlpJobRequest
+  | ThumbnailJobRequest
+  | ProbeRequest
   | CancelRequest
   | PingRequest
   | PickDirRequest
@@ -156,4 +203,4 @@ export interface UpdateEvent {
   message?: string;
 }
 
-export type CoAppEvent = PongEvent | JobEvent | PickDirEvent | ThumbEvent | HeartbeatEvent | UpdateEvent;
+export type CoAppEvent = PongEvent | JobEvent | PickDirEvent | ThumbEvent | HeartbeatEvent | UpdateEvent | ProbeEvent;

@@ -2,9 +2,9 @@ import { classifyMedia, isProbablyVideo } from './lib/media-detect';
 import { canonicalMediaUrl } from './lib/media-group';
 import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDuration } from './lib/m3u8';
 import { looksLikeMpd, mpdDuration } from './lib/mpd';
-import { buildFilename } from './lib/filename';
+import { buildFilename, buildYtdlpStem } from './lib/filename';
 import { isNewerVersion, REPO } from './lib/update';
-import type { JobInfo, MediaItem } from './lib/types';
+import type { JobInfo, MediaItem, ProbeState } from './lib/types';
 import type { CoAppEvent, CoAppRequest, PongEvent, StreamSelection } from '../../shared/protocol';
 
 const NATIVE_HOST = 'com.downy.coapp';
@@ -271,6 +271,28 @@ const pendingPickDir = new Map<string, (res: { dir: string | null; error?: strin
 
 // Запрошенные у CoApp кадры-превью: reqId -> куда положить результат
 const pendingThumbs = new Map<string, { tabId: number; url: string }>();
+
+// ---------- Разведка форматов (кеш по URL страницы) ----------
+
+const probeCache = new Map<string, ProbeState>();
+const pendingProbes = new Map<string, string>(); // reqId -> pageUrl
+
+/** Запускает разведку, если её ещё не было; отвечает текущим состоянием. */
+function ensureProbe(pageUrl: string): ProbeState {
+  const cached = probeCache.get(pageUrl);
+  if (cached) return cached;
+  const reqId = crypto.randomUUID();
+  pendingProbes.set(reqId, pageUrl);
+  const pending: ProbeState = { status: 'pending' };
+  probeCache.set(pageUrl, pending);
+  const res = sendToCoApp({ type: 'probe', reqId, pageUrl });
+  if (!res.ok) {
+    pendingProbes.delete(reqId);
+    probeCache.delete(pageUrl);
+    return { status: 'error', error: res.error };
+  }
+  return pending;
+}
 // Ожидающие ответа ping (проверка статуса из попапа)
 const pendingPings = new Set<(res: { ok: boolean; info?: PongEvent; error?: string }) => void>();
 // URL, по которым кадр уже запрашивали (успех или отказ) — не долбим ffmpeg повторно
@@ -301,6 +323,18 @@ function getCoAppPort(): chrome.runtime.Port {
       } else if (msg.state === 'error') {
         updateInProgress = false;
       }
+      return;
+    }
+    if (msg.type === 'probe') {
+      const url = pendingProbes.get(msg.reqId);
+      pendingProbes.delete(msg.reqId);
+      if (!url) return;
+      probeCache.set(
+        url,
+        msg.ok
+          ? { status: 'ready', title: msg.title, thumbnailUrl: msg.thumbnailUrl, formats: msg.formats ?? [] }
+          : { status: 'error', error: msg.error },
+      );
       return;
     }
     if (msg.type === 'thumb') {
@@ -341,6 +375,9 @@ function getCoAppPort(): chrome.runtime.Port {
     // Дадим шанс перезапросить кадры при следующем открытии попапа
     for (const { url } of pendingThumbs.values()) thumbTried.delete(url);
     pendingThumbs.clear();
+    // Зависшие разведки — тоже на повтор
+    for (const url of pendingProbes.values()) probeCache.delete(url);
+    pendingProbes.clear();
     for (const job of jobs.values()) {
       if (job.state === 'running' || job.state === 'starting') {
         job.state = 'error';
@@ -466,17 +503,50 @@ async function startYtdlpJob(
   pageUrl: string,
   pageTitle?: string,
   streams: StreamSelection = 'both',
+  maxHeight?: number,
+  qualityLabel?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const jobId = crypto.randomUUID();
+  // Название знаем из разведки — имя собираем сами (с датой и страховкой
+  // от перезаписи на хосте); разведки нет — yt-dlp именует по шаблону
+  const probed = probeCache.get(pageUrl);
+  const title = (probed?.status === 'ready' ? probed.title : undefined) ?? pageTitle;
+  const filenameStem = title ? buildYtdlpStem(title, pageUrl, qualityLabel, streams) : undefined;
   const job: JobInfo = {
     jobId,
-    label: `yt-dlp: ${pageTitle?.trim() || pageUrl}`,
+    label: filenameStem ?? `yt-dlp: ${pageUrl}`,
     state: 'starting',
     progress: null,
     sourceUrl: pageUrl,
   };
   jobs.set(jobId, job);
-  const res = sendToCoApp({ type: 'download_ytdlp', jobId, pageUrl, outDir: await getOutDir(), streams });
+  const res = sendToCoApp({
+    type: 'download_ytdlp',
+    jobId,
+    pageUrl,
+    outDir: await getOutDir(),
+    streams,
+    filenameStem,
+    maxHeight,
+  });
+  if (!res.ok) {
+    job.state = 'error';
+    job.message = res.error;
+  }
+  persist();
+  broadcastJobs();
+  return res;
+}
+
+/** Скачать обложку страницы через yt-dlp (для ютуба это превью-картинка). */
+async function startThumbnailJob(pageUrl: string, pageTitle?: string): Promise<{ ok: boolean; error?: string }> {
+  const jobId = crypto.randomUUID();
+  const probed = probeCache.get(pageUrl);
+  const title = (probed?.status === 'ready' ? probed.title : undefined) ?? pageTitle;
+  const filenameStem = buildYtdlpStem(title, pageUrl, 'обложка', 'both');
+  const job: JobInfo = { jobId, label: filenameStem, state: 'starting', progress: null };
+  jobs.set(jobId, job);
+  const res = sendToCoApp({ type: 'download_thumbnail', jobId, pageUrl, filenameStem, outDir: await getOutDir() });
   if (!res.ok) {
     job.state = 'error';
     job.message = res.error;
@@ -594,11 +664,14 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         const tabId = msg.tabId as number;
         const items = [...(tabMedia.get(tabId)?.values() ?? [])].sort((a, b) => a.foundAt - b.foundAt);
         for (const item of items) requestThumb(item);
+        // Страница с MSE-видео — сразу заряжаем разведку качеств
+        const pageVideo = tabPageVideo.get(tabId);
         sendResponse({
           items,
           jobs: [...jobs.values()],
           pageThumb: tabPageThumb.get(tabId),
-          pageVideo: tabPageVideo.get(tabId),
+          pageVideo,
+          probe: pageVideo ? ensureProbe(pageVideo.url) : undefined,
         });
         break;
       }
@@ -621,8 +694,14 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
           msg.pageUrl as string,
           msg.pageTitle as string | undefined,
           msg.streams as StreamSelection | undefined,
+          msg.maxHeight as number | undefined,
+          msg.qualityLabel as string | undefined,
         );
         sendResponse(res);
+        break;
+      }
+      case 'download-thumb-ytdlp': {
+        sendResponse(await startThumbnailJob(msg.pageUrl as string, msg.pageTitle as string | undefined));
         break;
       }
       case 'cancel-job': {
