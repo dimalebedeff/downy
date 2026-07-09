@@ -5,6 +5,7 @@ import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
 import { diffJobs } from '../lib/jobs-diff';
+import { isUnfinished } from '../lib/queue';
 import { qualityOptions } from '../lib/ytdlp-formats';
 
 type MediaGroup = ReturnType<typeof groupMediaItems>[number];
@@ -243,7 +244,7 @@ function renderMedia(): void {
       body.append(meta);
     }
 
-    if (job && (job.state === 'running' || job.state === 'starting')) {
+    if (job && isUnfinished(job.state)) {
       body.append(jobLine(job));
     } else if (job && job.state === 'done') {
       body.append(doneLine(job));
@@ -261,7 +262,7 @@ function renderMedia(): void {
     mediaList.append(li);
   }
 
-  renderTailJobs(lastJobs.filter((j) => !matched.has(j.jobId)));
+  renderJobs(matched);
 }
 
 /** Карточка «на странице есть видео» (MSE/blob) — качаем страницу через yt-dlp. */
@@ -293,7 +294,7 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
   title.title = pv.url;
   body.append(title);
 
-  if (job && (job.state === 'running' || job.state === 'starting')) {
+  if (job && isUnfinished(job.state)) {
     body.append(jobLine(job));
   } else if (job && job.state === 'done') {
     body.append(doneLine(job));
@@ -320,8 +321,10 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
         select.append(opt);
       }
     } else if (pageProbe?.status === 'pending') {
-      const opt = new Option('узнаю качества…', '');
+      // Точки бегут интервалом в init — селект живой, пока идёт разведка
+      const opt = new Option('Пробив', '', true, true);
       opt.disabled = true;
+      opt.dataset.probing = '1';
       select.append(opt);
     }
 
@@ -459,10 +462,45 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
   return row;
 }
 
-/** Живая загрузка: дышащая жёлтым шкала, проценты, отмена. */
+function smallBtn(cls: string, glyph: string, title: string, onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.className = cls;
+  btn.textContent = glyph;
+  btn.title = title;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function cancelBtn(job: JobInfo): HTMLButtonElement {
+  return smallBtn('cancel-btn', '✕', 'Отменить', () => {
+    void chrome.runtime.sendMessage({ type: 'cancel-job', jobId: job.jobId });
+  });
+}
+
+function pauseBtn(job: JobInfo): HTMLButtonElement {
+  return smallBtn('pause-btn', '⏸', 'Пауза', () => {
+    void chrome.runtime.sendMessage({ type: 'pause-job', jobId: job.jobId });
+  });
+}
+
+function resumeBtn(job: JobInfo): HTMLButtonElement {
+  return smallBtn('pause-btn', '▶', 'Продолжить', () => {
+    void chrome.runtime.sendMessage({ type: 'resume-job', jobId: job.jobId });
+  });
+}
+
+/** Незавершённая загрузка в карточке: шкала с кометой, пауза, отмена. */
 function jobLine(job: JobInfo): HTMLDivElement {
   const line = document.createElement('div');
   line.className = 'job-line';
+
+  if (job.state === 'queued') {
+    const label = document.createElement('span');
+    label.className = 'job-text queued';
+    label.textContent = 'в очереди';
+    line.append(label, cancelBtn(job));
+    return line;
+  }
 
   const bar = document.createElement('div');
   bar.className = 'bar';
@@ -470,23 +508,22 @@ function jobLine(job: JobInfo): HTMLDivElement {
   fill.className = 'bar-fill';
   const { text, ratio } = jobProgressView(job);
   if (ratio != null) fill.style.width = `${(ratio * 100).toFixed(2)}%`;
-  else fill.classList.add('indeterminate');
+  else if (job.state !== 'paused') fill.classList.add('indeterminate');
   bar.append(fill);
 
   const label = document.createElement('span');
   label.className = 'job-text';
+
+  if (job.state === 'paused') {
+    bar.classList.add('paused');
+    label.textContent = 'пауза';
+    line.append(bar, label, resumeBtn(job), cancelBtn(job));
+    return line;
+  }
+
   label.textContent = text;
   liveBars.set(job.jobId, { fill, label });
-
-  const cancel = document.createElement('button');
-  cancel.className = 'cancel-btn';
-  cancel.textContent = '✕';
-  cancel.title = 'Отменить';
-  cancel.addEventListener('click', () => {
-    void chrome.runtime.sendMessage({ type: 'cancel-job', jobId: job.jobId });
-  });
-
-  line.append(bar, label, cancel);
+  line.append(bar, label, pauseBtn(job), cancelBtn(job));
   return line;
 }
 
@@ -495,7 +532,7 @@ function doneLine(job: JobInfo): HTMLDivElement {
   line.className = 'job-line';
   const label = document.createElement('span');
   label.className = 'job-text done';
-  label.textContent = job.bytes ? `Готово · ${fmtSize(job.bytes)}` : 'Готово';
+  label.textContent = job.bytes ? fmtSize(job.bytes) : '✓';
   line.append(label);
   if (job.outFile) {
     const show = document.createElement('button');
@@ -593,87 +630,144 @@ function onUpdateProgress(state: string, message?: string): void {
   }
 }
 
-// ---------- Хвосты: загрузки без карточки (другие вкладки, yt-dlp, старое) ----------
+// ---------- Загрузки: очередь (активная + ждущие, драг) и завершённые ----------
 
-function renderTailJobs(jobs: JobInfo[]): void {
-  hasActiveJobs = lastJobs.some((j) => j.state === 'running' || j.state === 'starting');
-  syncUpdateBtn();
-  jobsSection.hidden = jobs.length === 0;
-  clearJobsBtn.hidden = !jobs.some((j) => j.state === 'done' || j.state === 'error' || j.state === 'canceled');
-  jobsList.textContent = '';
-  for (const job of jobs) {
-    const li = document.createElement('li');
-    li.className = 'tail-job';
+let dragId: string | null = null;
 
-    const row = document.createElement('div');
-    row.className = 'tail-row';
-    const title = document.createElement('span');
-    title.className = 'tail-title';
-    title.textContent = job.label;
-    title.title = job.outFile ?? job.label;
-    const state = document.createElement('span');
-    state.className = 'job-text';
-    if (job.state === 'done') {
-      state.classList.add('done');
-      state.textContent = job.bytes ? `готово · ${fmtSize(job.bytes)}` : 'готово';
-    } else if (job.state === 'error') {
-      state.classList.add('err');
-      state.textContent = 'ошибка';
-    } else if (job.state === 'canceled') {
-      state.classList.add('err');
-      state.textContent = 'отменено';
-    } else {
-      state.textContent = jobProgressView(job).text;
-    }
-    row.append(title, state);
+/** Строка очереди; порядок — сверху вниз, активная первой */
+function queueRow(job: JobInfo): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'tail-job queue-row';
+  li.dataset.jobId = job.jobId;
 
-    if (job.state === 'done' && job.outFile) {
-      const show = document.createElement('button');
-      show.className = 'link-btn show-btn';
-      show.textContent = 'в папке';
-      show.title = job.outFile;
-      show.addEventListener('click', async () => {
-        const res = await chrome.runtime.sendMessage({ type: 'show-in-folder', path: job.outFile });
-        if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку');
-      });
-      row.append(show);
-    }
+  const row = document.createElement('div');
+  row.className = 'tail-row';
 
-    if (job.state === 'running' || job.state === 'starting') {
-      const cancel = document.createElement('button');
-      cancel.className = 'cancel-btn';
-      cancel.textContent = '✕';
-      cancel.title = 'Отменить';
-      cancel.addEventListener('click', () => {
-        void chrome.runtime.sendMessage({ type: 'cancel-job', jobId: job.jobId });
-      });
-      row.append(cancel);
-    }
-
-    li.append(row);
-
-    if (job.state === 'running' || job.state === 'starting') {
-      const bar = document.createElement('div');
-      bar.className = 'bar';
-      const fill = document.createElement('div');
-      fill.className = 'bar-fill';
-      const { ratio } = jobProgressView(job);
-      if (ratio != null) fill.style.width = `${(ratio * 100).toFixed(2)}%`;
-      else fill.classList.add('indeterminate');
-      bar.append(fill);
-      li.append(bar);
-      liveBars.set(job.jobId, { fill, label: state });
-    }
-
-    if (job.state === 'error' && job.message) {
-      const msg = document.createElement('div');
-      msg.className = 'job-msg';
-      msg.textContent = job.message.slice(0, 300);
-      li.append(msg);
-    }
-
-    jobsList.append(li);
+  // Обложки и мелкое аудио идут мимо очереди — их не потаскаешь
+  if (!job.noQueue) {
+    li.draggable = true;
+    const handle = document.createElement('span');
+    handle.className = 'drag-handle';
+    handle.textContent = '⋮⋮';
+    handle.title = 'Тащи, чтобы поменять порядок';
+    row.append(handle);
+    li.addEventListener('dragstart', (e) => {
+      dragId = job.jobId;
+      li.classList.add('dragging');
+      e.dataTransfer?.setData('text/plain', job.jobId);
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    li.addEventListener('dragend', () => {
+      li.classList.remove('dragging');
+      dragId = null;
+      const order = [...jobsList.querySelectorAll<HTMLLIElement>('li.queue-row[draggable="true"]')]
+        .map((el) => el.dataset.jobId ?? '')
+        .filter(Boolean);
+      void chrome.runtime.sendMessage({ type: 'reorder-jobs', order });
+    });
   }
+
+  const title = document.createElement('span');
+  title.className = 'tail-title';
+  title.textContent = job.label;
+  title.title = job.outFile ?? job.label;
+
+  const state = document.createElement('span');
+  state.className = 'job-text';
+  row.append(title, state);
+
+  if (job.state === 'queued') {
+    state.classList.add('queued');
+    state.textContent = 'в очереди';
+    row.append(cancelBtn(job));
+  } else if (job.state === 'paused') {
+    state.textContent = 'пауза';
+    row.append(resumeBtn(job), cancelBtn(job));
+  } else {
+    state.textContent = jobProgressView(job).text;
+    if (!job.noQueue) row.append(pauseBtn(job));
+    row.append(cancelBtn(job));
+  }
+
+  li.append(row);
+
+  if (job.state !== 'queued') {
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const fill = document.createElement('div');
+    fill.className = 'bar-fill';
+    const { ratio } = jobProgressView(job);
+    if (ratio != null) fill.style.width = `${(ratio * 100).toFixed(2)}%`;
+    else if (job.state !== 'paused') fill.classList.add('indeterminate');
+    if (job.state === 'paused') bar.classList.add('paused');
+    bar.append(fill);
+    li.append(bar);
+    if (job.state !== 'paused') liveBars.set(job.jobId, { fill, label: state });
+  }
+
+  return li;
+}
+
+function finishedRow(job: JobInfo): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'tail-job';
+
+  const row = document.createElement('div');
+  row.className = 'tail-row';
+  const title = document.createElement('span');
+  title.className = 'tail-title';
+  title.textContent = job.label;
+  title.title = job.outFile ?? job.label;
+  const state = document.createElement('span');
+  state.className = 'job-text';
+  if (job.state === 'done') {
+    state.classList.add('done');
+    state.textContent = job.bytes ? fmtSize(job.bytes) : '✓';
+  } else if (job.state === 'canceled') {
+    state.classList.add('err');
+    state.textContent = 'отменено';
+  } else {
+    state.classList.add('err');
+    state.textContent = 'ошибка';
+  }
+  row.append(title, state);
+
+  if (job.state === 'done' && job.outFile) {
+    const show = document.createElement('button');
+    show.className = 'link-btn show-btn';
+    show.textContent = 'в папке';
+    show.title = job.outFile;
+    show.addEventListener('click', async () => {
+      const res = await chrome.runtime.sendMessage({ type: 'show-in-folder', path: job.outFile });
+      if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку');
+    });
+    row.append(show);
+  }
+
+  li.append(row);
+
+  if (job.state === 'error' && job.message) {
+    const msg = document.createElement('div');
+    msg.className = 'job-msg';
+    msg.textContent = job.message.slice(0, 300);
+    li.append(msg);
+  }
+
+  return li;
+}
+
+function renderJobs(matched: Set<string>): void {
+  hasActiveJobs = lastJobs.some((j) => j.state === 'running' || j.state === 'starting' || j.state === 'queued');
+  syncUpdateBtn();
+  // Очередь целиком (и карточные загрузки тоже — здесь их порядок и драг);
+  // завершённые без карточки — хвостом
+  const queue = lastJobs.filter((j) => isUnfinished(j.state));
+  const finished = lastJobs.filter((j) => !isUnfinished(j.state) && !matched.has(j.jobId));
+  jobsSection.hidden = queue.length === 0 && finished.length === 0;
+  clearJobsBtn.hidden = finished.length === 0;
+  jobsList.textContent = '';
+  for (const job of queue) jobsList.append(queueRow(job));
+  for (const job of finished) jobsList.append(finishedRow(job));
 }
 
 // ---------- Инициализация ----------
@@ -713,7 +807,7 @@ async function init(): Promise<void> {
       if (kind === 'progress') {
         for (const j of jobs) updateJobProgress(j);
       } else if (kind === 'structural') {
-        if (kebabMenu.hidden) renderMedia();
+        if (kebabMenu.hidden && !dragId) renderMedia();
         else needsRender = true;
       }
     }
@@ -722,11 +816,32 @@ async function init(): Promise<void> {
 
   void initUpdater();
 
-  // Пока попап открыт, список может пополняться; открытое меню не дёргаем
+  // Пока попап открыт, список может пополняться; открытое меню и драг не дёргаем
   const mediaPoll = setInterval(() => {
-    if (kebabMenu.hidden) void refresh();
+    if (kebabMenu.hidden && !dragId) void refresh();
   }, 2000);
   window.addEventListener('unload', () => clearInterval(mediaPoll));
+
+  // Бегущие точки «Пробив…», пока едет разведка качеств
+  let probeDotsN = 0;
+  setInterval(() => {
+    probeDotsN = (probeDotsN + 1) % 4;
+    const text = `Пробив${'.'.repeat(probeDotsN)}`;
+    for (const el of document.querySelectorAll('[data-probing]')) el.textContent = text;
+  }, 400);
+
+  // Перетаскивание строк очереди: тащим над списком, порядок уедет на dragend
+  jobsList.addEventListener('dragover', (e) => {
+    if (!dragId) return;
+    e.preventDefault();
+    const dragging = jobsList.querySelector<HTMLLIElement>('li.dragging');
+    if (!dragging) return;
+    const rows = [...jobsList.querySelectorAll<HTMLLIElement>('li.queue-row[draggable="true"]:not(.dragging)')];
+    const next = rows.find((el) => e.clientY < el.getBoundingClientRect().top + el.offsetHeight / 2);
+    if (next) jobsList.insertBefore(dragging, next);
+    else rows.at(-1)?.after(dragging);
+  });
+  jobsList.addEventListener('drop', (e) => e.preventDefault());
 
   statusDot.addEventListener('click', () => {
     if (!statusBanner.textContent) return; // статус ещё не доехал — нечего показывать
@@ -754,6 +869,13 @@ async function init(): Promise<void> {
     const res = await chrome.runtime.sendMessage({ type: 'clear-jobs' });
     lastJobs = res?.jobs ?? [];
     renderMedia();
+  });
+
+  const askDirBox = $<HTMLInputElement>('#ask-dir');
+  const { askDirEveryTime } = await chrome.storage.local.get({ askDirEveryTime: false });
+  askDirBox.checked = askDirEveryTime as boolean;
+  askDirBox.addEventListener('change', () => {
+    void chrome.storage.local.set({ askDirEveryTime: askDirBox.checked });
   });
 
   let defaultOutDir = '';

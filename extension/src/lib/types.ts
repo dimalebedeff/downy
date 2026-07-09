@@ -32,8 +32,12 @@ export interface JobInfo {
   label: string;
   /** URL медиа (или страницы для yt-dlp) — по нему попап находит карточку загрузки */
   sourceUrl?: string;
-  state: 'starting' | 'running' | 'done' | 'error' | 'canceled';
+  state: 'queued' | 'starting' | 'running' | 'paused' | 'done' | 'error' | 'canceled';
   progress: number | null;
+  /** Кто поставил паузу: юзер (ждёт ▶) или вытеснение (продолжится само) */
+  pausedBy?: 'user' | 'preempt';
+  /** Мимо очереди (обложки): мелочь не должна ждать двухгиговое кино */
+  noQueue?: boolean;
   bytes?: number;
   totalBytes?: number;
   message?: string;

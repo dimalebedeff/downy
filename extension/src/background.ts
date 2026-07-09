@@ -4,8 +4,17 @@ import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDurat
 import { looksLikeMpd, mpdDuration } from './lib/mpd';
 import { buildFilename, buildYtdlpStem } from './lib/filename';
 import { isNewerVersion, REPO } from './lib/update';
+import { applyReorder, isUnfinished, nextToStart, normalizeOrder } from './lib/queue';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
-import type { CoAppEvent, CoAppRequest, PongEvent, StreamSelection } from '../../shared/protocol';
+import type {
+  CoAppEvent,
+  CoAppRequest,
+  DirectJobRequest,
+  HlsJobRequest,
+  PongEvent,
+  StreamSelection,
+  YtdlpJobRequest,
+} from '../../shared/protocol';
 
 const NATIVE_HOST = 'com.downy.coapp';
 
@@ -26,9 +35,81 @@ const tabPageVideo = new Map<number, PageVideo>();
 const jobs = new Map<string, JobInfo>();
 const inflightHls = new Set<string>();
 
+// ---------- Очередь: качается одна, остальные ждут ----------
+
+/** Порядок незавершённых загрузок; голова — активная */
+let queueOrder: string[] = [];
+/** Исходные запросы к CoApp — для отложенного старта и резюма после паузы */
+const jobRequests = new Map<string, CoAppRequest>();
+
+/** Джобы для попапа: очередь в своём порядке, потом обложки и завершённые */
+function jobList(): JobInfo[] {
+  const orderIdx = new Map(queueOrder.map((id, i) => [id, i]));
+  return [...jobs.values()].sort((a, b) => {
+    const ai = isUnfinished(a.state) ? orderIdx.get(a.jobId) ?? 1e9 : 2e9;
+    const bi = isUnfinished(b.state) ? orderIdx.get(b.jobId) ?? 1e9 : 2e9;
+    return ai - bi;
+  });
+}
+
+/** Двигает очередь: если активной нет — стартует следующую (или резюмит вытесненную).
+ *  Идемпотентна и дёшева — можно дёргать при любом удобном случае. */
+function pump(): void {
+  queueOrder = normalizeOrder(queueOrder, jobs);
+  const id = nextToStart(queueOrder, jobs);
+  if (!id) return;
+  const job = jobs.get(id)!;
+  const req = jobRequests.get(id);
+  if (!req) {
+    job.state = 'error';
+    job.message = 'Запрос загрузки потерялся при перезапуске';
+    pump();
+    return;
+  }
+  // Недокачанный файл от паузы — продолжаем его, а не начинаем новый
+  if (job.outFile && (req.type === 'download_hls' || req.type === 'download_direct' || req.type === 'download_ytdlp')) {
+    (req as HlsJobRequest | DirectJobRequest | YtdlpJobRequest).resumePath = job.outFile;
+  }
+  job.state = 'starting';
+  job.pausedBy = undefined;
+  const res = sendToCoApp(req);
+  if (!res.ok) {
+    // CoApp лежит — остальную очередь не мучаем, юзер увидит ошибку на первой
+    job.state = 'error';
+    job.message = res.error;
+  }
+  persist();
+  broadcastJobs();
+}
+
+/** Лёгкое (обложки, мелкое аудио) не ждёт в очереди за двухгиговым кино */
+const NO_QUEUE_MAX_BYTES = 250 * 1024 * 1024;
+
+/** Ставит загрузку в очередь; noQueue-мелочь стартует сразу и параллельно */
+function enqueueJob(job: JobInfo, req: CoAppRequest): void {
+  jobs.set(job.jobId, job);
+  jobRequests.set(job.jobId, req);
+  if (job.noQueue) {
+    job.state = 'starting';
+    const res = sendToCoApp(req);
+    if (!res.ok) {
+      job.state = 'error';
+      job.message = res.error;
+    }
+    persist();
+    broadcastJobs();
+    return;
+  }
+  queueOrder.push(job.jobId);
+  pump();
+  broadcastJobs();
+}
+
 // Service worker может быть выгружен в любой момент — состояние живёт в storage.session
 const restored: Promise<void> = (async () => {
-  const data = await chrome.storage.session.get(['tabMedia', 'jobs', 'tabVariantUrls', 'tabPageThumb', 'tabPageVideo']);
+  const data = await chrome.storage.session.get([
+    'tabMedia', 'jobs', 'tabVariantUrls', 'tabPageThumb', 'tabPageVideo', 'queueOrder', 'jobRequests',
+  ]);
   if (data.tabPageThumb) {
     for (const [tabId, thumb] of Object.entries(data.tabPageThumb as Record<string, string>)) {
       tabPageThumb.set(Number(tabId), thumb);
@@ -49,18 +130,32 @@ const restored: Promise<void> = (async () => {
       tabVariantUrls.set(Number(tabId), new Set(urls));
     }
   }
+  if (data.jobRequests) {
+    for (const [id, req] of Object.entries(data.jobRequests as Record<string, CoAppRequest>)) {
+      jobRequests.set(id, req);
+    }
+  }
   if (data.jobs) {
     for (const [id, job] of Object.entries(data.jobs as Record<string, JobInfo>)) {
-      // Рестарт SW закрыл порт, CoApp вместе с загрузками умер —
-      // иначе job навсегда останется «running» в попапе
+      // Рестарт SW закрыл порт, CoApp вместе с загрузками умер. Если запрос
+      // сохранился — ставим на паузу (докачается), иначе честная ошибка
       if (job.state === 'running' || job.state === 'starting') {
-        job.state = 'error';
-        job.message = 'Прервано перезапуском браузера';
+        if (jobRequests.has(id)) {
+          job.state = 'paused';
+          job.pausedBy = 'user';
+        } else {
+          job.state = 'error';
+          job.message = 'Прервано перезапуском браузера';
+        }
       }
       jobs.set(id, job);
     }
   }
+  queueOrder = normalizeOrder((data.queueOrder as string[]) ?? [], jobs);
 })();
+
+// После рестарта SW очередь продолжает ехать сама
+void restored.then(() => pump());
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 function persist(): void {
@@ -77,6 +172,8 @@ function persist(): void {
       tabPageThumb: Object.fromEntries(tabPageThumb),
       tabPageVideo: Object.fromEntries(tabPageVideo),
       jobs: Object.fromEntries(jobs),
+      queueOrder,
+      jobRequests: Object.fromEntries(jobRequests),
     });
   }, 300);
 }
@@ -353,13 +450,19 @@ function getCoAppPort(): chrome.runtime.Port {
     const job = jobs.get(msg.jobId);
     if (!job) return;
     job.state = msg.state;
-    job.progress = msg.progress;
+    // Пауза шлёт progress: null — не стираем позицию полоски
+    if (msg.state !== 'paused' || msg.progress != null) job.progress = msg.progress;
     job.message = msg.message;
     if (msg.bytes != null) job.bytes = msg.bytes;
     if (msg.totalBytes != null) job.totalBytes = msg.totalBytes;
     if (msg.outFile) job.outFile = msg.outFile;
+    if (msg.state === 'done' || msg.state === 'error' || msg.state === 'canceled') {
+      jobRequests.delete(msg.jobId);
+    }
     persist();
     broadcastJobs();
+    // Место освободилось (готово/ошибка/отмена/пауза) — очередь едет дальше
+    if (msg.state !== 'running') pump();
   });
   port.onDisconnect.addListener(() => {
     const err = chrome.runtime.lastError?.message;
@@ -380,8 +483,16 @@ function getCoAppPort(): chrome.runtime.Port {
     pendingProbes.clear();
     for (const job of jobs.values()) {
       if (job.state === 'running' || job.state === 'starting') {
-        job.state = 'error';
-        job.message = err ?? 'CoApp отключился';
+        // Запрос сохранился — паузим, юзер продолжит кнопкой; авторесюм
+        // не делаем, чтобы упавший хост не перезапускался по кругу
+        if (jobRequests.has(job.jobId) && !job.noQueue) {
+          job.state = 'paused';
+          job.pausedBy = 'user';
+          job.message = err ?? 'CoApp отключился';
+        } else {
+          job.state = 'error';
+          job.message = err ?? 'CoApp отключился';
+        }
       }
     }
     persist();
@@ -392,7 +503,7 @@ function getCoAppPort(): chrome.runtime.Port {
 }
 
 function broadcastJobs(): void {
-  void chrome.runtime.sendMessage({ type: 'jobs-updated', jobs: [...jobs.values()] }).catch(() => {});
+  void chrome.runtime.sendMessage({ type: 'jobs-updated', jobs: jobList() }).catch(() => {});
 }
 
 function sendToCoApp(req: CoAppRequest): { ok: boolean; error?: string } {
@@ -443,9 +554,34 @@ function requestThumb(item: MediaItem): void {
   }
 }
 
-async function getOutDir(): Promise<string | undefined> {
-  const { outDir } = await chrome.storage.local.get({ outDir: '' });
-  return (outDir as string).trim() || undefined;
+/** Нативный диалог выбора папки через CoApp */
+function pickDirDialog(current?: string): Promise<{ dir: string | null; error?: string }> {
+  return new Promise((resolve) => {
+    const reqId = crypto.randomUUID();
+    pendingPickDir.set(reqId, resolve);
+    const sent = sendToCoApp({ type: 'pick_dir', reqId, current });
+    if (!sent.ok) {
+      pendingPickDir.delete(reqId);
+      resolve({ dir: null, error: sent.error ?? 'CoApp недоступен' });
+    }
+    // Страховка: если CoApp так и не ответил, не держим промис вечно
+    setTimeout(() => {
+      const resolveTimeout = pendingPickDir.get(reqId);
+      pendingPickDir.delete(reqId);
+      resolveTimeout?.({ dir: null, error: 'Диалог выбора папки не ответил' });
+    }, 300_000);
+  });
+}
+
+/** Папка для новой загрузки; с галочкой «спрашивать каждый раз» — диалог */
+async function resolveJobOutDir(): Promise<{ dir?: string; canceled?: boolean; error?: string }> {
+  const { outDir, askDirEveryTime } = await chrome.storage.local.get({ outDir: '', askDirEveryTime: false });
+  const saved = (outDir as string).trim() || undefined;
+  if (!askDirEveryTime) return { dir: saved };
+  const res = await pickDirDialog(saved);
+  if (res.error) return { error: res.error };
+  if (!res.dir) return { canceled: true }; // юзер закрыл диалог — передумал качать
+  return { dir: res.dir };
 }
 
 async function startHlsJob(
@@ -454,49 +590,54 @@ async function startHlsJob(
   variantLabel?: string,
   streams: StreamSelection = 'both',
 ): Promise<{ ok: boolean; error?: string }> {
+  const dir = await resolveJobOutDir();
+  if (dir.canceled) return { ok: true };
+  if (dir.error) return { ok: false, error: dir.error };
   const jobId = crypto.randomUUID();
   const filename = buildFilename(item, variantLabel, streams);
-  const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null, sourceUrl: item.url };
-  jobs.set(jobId, job);
-  const res = sendToCoApp({
+  const job: JobInfo = { jobId, label: filename, state: 'queued', progress: null, sourceUrl: item.url };
+  enqueueJob(job, {
     type: 'download_hls',
     jobId,
     url: variantUrl ?? item.url,
     filename,
-    outDir: await getOutDir(),
+    outDir: dir.dir,
     streams,
     headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
   });
-  if (!res.ok) {
-    job.state = 'error';
-    job.message = res.error;
-  }
-  persist();
-  broadcastJobs();
-  return res;
+  return { ok: true };
 }
 
 async function startDirectJob(item: MediaItem, streams: StreamSelection = 'both'): Promise<{ ok: boolean; error?: string }> {
+  const dir = await resolveJobOutDir();
+  if (dir.canceled) return { ok: true };
+  if (dir.error) return { ok: false, error: dir.error };
   const jobId = crypto.randomUUID();
   const filename = buildFilename(item, undefined, streams);
-  const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null, totalBytes: streams === 'both' ? item.size : undefined, sourceUrl: item.url };
-  jobs.set(jobId, job);
-  const res = sendToCoApp({
+  const ct = (item.contentType ?? '').toLowerCase();
+  // Мелочь мимо очереди: картинки-обложки и аудио с известным скромным весом
+  const audioIntent = streams === 'audio' || ct.startsWith('audio');
+  const noQueue =
+    ct.startsWith('image') || (audioIntent && item.size != null && item.size <= NO_QUEUE_MAX_BYTES) || undefined;
+  const job: JobInfo = {
+    jobId,
+    label: filename,
+    state: 'queued',
+    progress: null,
+    totalBytes: streams === 'both' ? item.size : undefined,
+    sourceUrl: item.url,
+    noQueue,
+  };
+  enqueueJob(job, {
     type: 'download_direct',
     jobId,
     url: item.url,
     filename,
-    outDir: await getOutDir(),
+    outDir: dir.dir,
     streams,
     headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
   });
-  if (!res.ok) {
-    job.state = 'error';
-    job.message = res.error;
-  }
-  persist();
-  broadcastJobs();
-  return res;
+  return { ok: true };
 }
 
 async function startYtdlpJob(
@@ -506,54 +647,57 @@ async function startYtdlpJob(
   maxHeight?: number,
   qualityLabel?: string,
 ): Promise<{ ok: boolean; error?: string }> {
+  const dir = await resolveJobOutDir();
+  if (dir.canceled) return { ok: true };
+  if (dir.error) return { ok: false, error: dir.error };
   const jobId = crypto.randomUUID();
   // Название знаем из разведки — имя собираем сами (с датой и страховкой
   // от перезаписи на хосте); разведки нет — yt-dlp именует по шаблону
   const probed = probeCache.get(pageUrl);
-  const title = (probed?.status === 'ready' ? probed.title : undefined) ?? pageTitle;
+  const ready = probed?.status === 'ready' ? probed : undefined;
+  const title = ready?.title ?? pageTitle;
   const filenameStem = title ? buildYtdlpStem(title, pageUrl, qualityLabel, streams) : undefined;
+  // Скромное аудио (вес знаем из разведки) не ждёт очередь
+  let noQueue: boolean | undefined;
+  if (streams === 'audio' && ready) {
+    let best = 0;
+    for (const f of ready.formats) {
+      if (!f.hasVideo && f.hasAudio && f.sizeBytes && f.sizeBytes > best) best = f.sizeBytes;
+    }
+    if (best > 0 && best <= NO_QUEUE_MAX_BYTES) noQueue = true;
+  }
   const job: JobInfo = {
     jobId,
     label: filenameStem ?? `yt-dlp: ${pageUrl}`,
-    state: 'starting',
+    state: 'queued',
     progress: null,
     sourceUrl: pageUrl,
+    noQueue,
   };
-  jobs.set(jobId, job);
-  const res = sendToCoApp({
+  enqueueJob(job, {
     type: 'download_ytdlp',
     jobId,
     pageUrl,
-    outDir: await getOutDir(),
+    outDir: dir.dir,
     streams,
     filenameStem,
     maxHeight,
   });
-  if (!res.ok) {
-    job.state = 'error';
-    job.message = res.error;
-  }
-  persist();
-  broadcastJobs();
-  return res;
+  return { ok: true };
 }
 
 /** Скачать обложку страницы через yt-dlp (для ютуба это превью-картинка). */
 async function startThumbnailJob(pageUrl: string, pageTitle?: string): Promise<{ ok: boolean; error?: string }> {
+  const dir = await resolveJobOutDir();
+  if (dir.canceled) return { ok: true };
+  if (dir.error) return { ok: false, error: dir.error };
   const jobId = crypto.randomUUID();
   const probed = probeCache.get(pageUrl);
   const title = (probed?.status === 'ready' ? probed.title : undefined) ?? pageTitle;
   const filenameStem = buildYtdlpStem(title, pageUrl, 'обложка', 'both');
-  const job: JobInfo = { jobId, label: filenameStem, state: 'starting', progress: null };
-  jobs.set(jobId, job);
-  const res = sendToCoApp({ type: 'download_thumbnail', jobId, pageUrl, filenameStem, outDir: await getOutDir() });
-  if (!res.ok) {
-    job.state = 'error';
-    job.message = res.error;
-  }
-  persist();
-  broadcastJobs();
-  return res;
+  const job: JobInfo = { jobId, label: filenameStem, state: 'queued', progress: null, noQueue: true };
+  enqueueJob(job, { type: 'download_thumbnail', jobId, pageUrl, filenameStem, outDir: dir.dir });
+  return { ok: true };
 }
 
 // ---------- Обновление Downy ----------
@@ -593,7 +737,8 @@ async function checkUpdate(): Promise<UpdateStatus> {
 }
 
 function hasActiveJobs(): boolean {
-  return [...jobs.values()].some((j) => j.state === 'running' || j.state === 'starting');
+  // Очередь тоже считается: обновление перезапустит расширение и потеряет её
+  return [...jobs.values()].some((j) => j.state === 'running' || j.state === 'starting' || j.state === 'queued');
 }
 
 async function runUpdate(): Promise<{ ok: boolean; error?: string }> {
@@ -666,9 +811,11 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         for (const item of items) requestThumb(item);
         // Страница с MSE-видео — сразу заряжаем разведку качеств
         const pageVideo = tabPageVideo.get(tabId);
+        // Заодно оживляем очередь, если она встала (например, CoApp падал)
+        pump();
         sendResponse({
           items,
-          jobs: [...jobs.values()],
+          jobs: jobList(),
           pageThumb: tabPageThumb.get(tabId),
           pageVideo,
           probe: pageVideo ? ensureProbe(pageVideo.url) : undefined,
@@ -705,7 +852,69 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         break;
       }
       case 'cancel-job': {
-        sendResponse(sendToCoApp({ type: 'cancel', jobId: msg.jobId as string }));
+        const id = msg.jobId as string;
+        const job = jobs.get(id);
+        if (job && (job.state === 'queued' || job.state === 'paused')) {
+          // До хоста эта загрузка не дошла или уже убита — гасим локально
+          job.state = 'canceled';
+          jobRequests.delete(id);
+          if (job.outFile) sendToCoApp({ type: 'cleanup_partials', path: job.outFile });
+          job.outFile = undefined;
+          persist();
+          broadcastJobs();
+          pump();
+          sendResponse({ ok: true });
+        } else {
+          sendResponse(sendToCoApp({ type: 'cancel', jobId: id }));
+        }
+        break;
+      }
+      case 'pause-job': {
+        const job = jobs.get(msg.jobId as string);
+        if (!job) {
+          sendResponse({ ok: false, error: 'Загрузка не найдена' });
+        } else if (job.state === 'running' || job.state === 'starting') {
+          job.pausedBy = 'user';
+          sendResponse(sendToCoApp({ type: 'pause', jobId: job.jobId }));
+        } else if (job.state === 'queued') {
+          job.state = 'paused';
+          job.pausedBy = 'user';
+          persist();
+          broadcastJobs();
+          pump();
+          sendResponse({ ok: true });
+        } else {
+          sendResponse({ ok: true });
+        }
+        break;
+      }
+      case 'resume-job': {
+        const job = jobs.get(msg.jobId as string);
+        if (job && job.state === 'paused') {
+          job.state = 'queued';
+          job.pausedBy = undefined;
+          persist();
+          broadcastJobs();
+          pump();
+        }
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'reorder-jobs': {
+        const { order, preemptId } = applyReorder(queueOrder, (msg.order as string[]) ?? [], jobs);
+        queueOrder = order;
+        if (preemptId) {
+          // Наверх приехала другая — активную на паузу; её paused-событие
+          // запустит pump, и новая голова стартует
+          const active = jobs.get(preemptId);
+          if (active) active.pausedBy = 'preempt';
+          sendToCoApp({ type: 'pause', jobId: preemptId });
+        } else {
+          pump();
+        }
+        persist();
+        broadcastJobs();
+        sendResponse({ ok: true });
         break;
       }
       case 'show-in-folder': {
@@ -714,10 +923,13 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
       }
       case 'clear-jobs': {
         for (const [id, job] of jobs) {
-          if (job.state === 'done' || job.state === 'error' || job.state === 'canceled') jobs.delete(id);
+          if (job.state === 'done' || job.state === 'error' || job.state === 'canceled') {
+            jobs.delete(id);
+            jobRequests.delete(id);
+          }
         }
         persist();
-        sendResponse({ jobs: [...jobs.values()] });
+        sendResponse({ jobs: jobList() });
         break;
       }
       case 'coapp-status': {
@@ -733,21 +945,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         break;
       }
       case 'pick-out-dir': {
-        const reqId = crypto.randomUUID();
-        const res = await new Promise<{ dir: string | null; error?: string }>((resolve) => {
-          pendingPickDir.set(reqId, resolve);
-          const sent = sendToCoApp({ type: 'pick_dir', reqId, current: msg.current as string | undefined });
-          if (!sent.ok) {
-            pendingPickDir.delete(reqId);
-            resolve({ dir: null, error: sent.error ?? 'CoApp недоступен' });
-          }
-          // Страховка: если CoApp так и не ответил, не держим промис вечно
-          setTimeout(() => {
-            const resolveTimeout = pendingPickDir.get(reqId);
-            pendingPickDir.delete(reqId);
-            resolveTimeout?.({ dir: null, error: 'Диалог выбора папки не ответил' });
-          }, 300_000);
-        });
+        const res = await pickDirDialog(msg.current as string | undefined);
         // Сохраняем в фоне: выбор не потеряется, даже если попап уже закрыт
         if (res.dir) await chrome.storage.local.set({ outDir: res.dir });
         sendResponse(res.error ? { ok: false, error: res.error } : { ok: true, dir: res.dir });

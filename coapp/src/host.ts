@@ -85,6 +85,8 @@ function uniquePath(dir: string, filename: string): string {
 
 interface RunningJob {
   canceled: boolean;
+  /** Пауза: процесс убиваем, но недокачанное оставляем для резюма */
+  paused: boolean;
   kill(): void;
 }
 
@@ -93,6 +95,7 @@ const jobs = new Map<string, RunningJob>();
 function processJob(child: ChildProcess): RunningJob {
   return {
     canceled: false,
+    paused: false,
     kill() {
       const pid = child.pid;
       if (pid) {
@@ -113,9 +116,24 @@ function emit(event: JobEvent): void {
   sendMessage(event);
 }
 
-function jobDone(jobId: string, code: number | null, canceled: boolean, outFile: string, errTail: string): void {
+function jobDone(
+  jobId: string,
+  code: number | null,
+  flags: { canceled: boolean; paused?: boolean },
+  outFile: string,
+  errTail: string,
+  pausedKeepsFile = true,
+): void {
   jobs.delete(jobId);
-  if (canceled) {
+  if (flags.paused) {
+    // outFile в событии = «есть что докачивать»; без него резюм начнёт сначала
+    if (pausedKeepsFile) {
+      emit({ type: 'job', jobId, state: 'paused', progress: null, outFile });
+    } else {
+      fs.rm(outFile, { force: true }, () => {});
+      emit({ type: 'job', jobId, state: 'paused', progress: null });
+    }
+  } else if (flags.canceled) {
     fs.rm(outFile, { force: true }, () => {});
     emit({ type: 'job', jobId, state: 'canceled', progress: null });
   } else if (code === 0) {
@@ -180,10 +198,15 @@ function startHls(req: HlsJobRequest): void {
   const streams = req.streams ?? 'both';
   let outFile: string;
   try {
-    const outDir = resolveOutDir(req.outDir);
-    const wantExt = streams === 'audio' ? '.m4a' : '.mp4';
-    const filename = req.filename.toLowerCase().endsWith(wantExt) ? req.filename : `${req.filename}${wantExt}`;
-    outFile = uniquePath(outDir, filename);
+    if (req.resumePath) {
+      // Докачка после паузы: тот же файл, yt-dlp сам продолжит .part
+      outFile = req.resumePath;
+    } else {
+      const outDir = resolveOutDir(req.outDir);
+      const wantExt = streams === 'audio' ? '.m4a' : '.mp4';
+      const filename = req.filename.toLowerCase().endsWith(wantExt) ? req.filename : `${req.filename}${wantExt}`;
+      outFile = uniquePath(outDir, filename);
+    }
   } catch (e) {
     emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: String(e) });
     return;
@@ -235,13 +258,17 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelec
   child.on('close', (code) => {
     if (settled) return;
     settled = true;
-    log('yt-dlp hls exit', req.jobId, code, 'canceled:', job.canceled);
-    if (job.canceled) {
+    log('yt-dlp hls exit', req.jobId, code, 'canceled:', job.canceled, 'paused:', job.paused);
+    if (job.paused) {
+      // Хвосты .part остаются на диске — по ним yt-dlp продолжит
+      jobs.delete(req.jobId);
+      emit({ type: 'job', jobId: req.jobId, state: 'paused', progress: null, outFile });
+    } else if (job.canceled) {
       jobs.delete(req.jobId);
       cleanupPartials(dlFile);
       emit({ type: 'job', jobId: req.jobId, state: 'canceled', progress: null });
     } else if (code === 0) {
-      if (streams === 'both') jobDone(req.jobId, code, false, outFile, errTail);
+      if (streams === 'both') jobDone(req.jobId, code, job, outFile, errTail);
       else stripTracks(req.jobId, dlFile, outFile, streams);
     } else {
       fallback(errTail);
@@ -290,7 +317,8 @@ function stripTracks(jobId: string, srcFile: string, outFile: string, streams: '
       // временный файл не критичен
     }
     log('strip exit', jobId, code, 'canceled:', job.canceled);
-    jobDone(jobId, code, job.canceled, outFile, errTail);
+    // Вырезка дорожки — быстрая локальная операция, пауза к ней не применяется
+    jobDone(jobId, code, { canceled: job.canceled }, outFile, errTail);
   };
   child.on('error', (e) => {
     errTail = `Не удалось запустить ffmpeg: ${e.message}`;
@@ -365,16 +393,28 @@ function startFfmpegCopy(req: FfmpegCopySource, outFile: string, streams: Stream
   });
 
   child.on('close', (code) => {
-    log('ffmpeg exit', req.jobId, code, 'canceled:', job.canceled);
-    jobDone(req.jobId, code, job.canceled, outFile, errTail);
+    log('ffmpeg exit', req.jobId, code, 'canceled:', job.canceled, 'paused:', job.paused);
+    // Обрубленный ffmpeg-файл не докачивается — пауза здесь = начать заново
+    jobDone(req.jobId, code, job, outFile, errTail, false);
   });
 }
 
 async function startDirect(req: DirectJobRequest): Promise<void> {
   let outFile: string;
+  let startBytes = 0;
   try {
-    const outDir = resolveOutDir(req.outDir);
-    outFile = uniquePath(outDir, req.filename);
+    if (req.resumePath) {
+      // Докачка после паузы: продолжаем тот же файл с байта, где остановились
+      outFile = req.resumePath;
+      try {
+        startBytes = fs.statSync(outFile).size;
+      } catch {
+        startBytes = 0; // файл увели — качаем заново
+      }
+    } else {
+      const outDir = resolveOutDir(req.outDir);
+      outFile = uniquePath(outDir, req.filename);
+    }
   } catch (e) {
     emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: String(e) });
     return;
@@ -388,7 +428,7 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
   }
 
   const ac = new AbortController();
-  const job: RunningJob = { canceled: false, kill: () => ac.abort() };
+  const job: RunningJob = { canceled: false, paused: false, kill: () => ac.abort() };
   jobs.set(req.jobId, job);
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
   log('direct start', req.jobId, req.url, '->', outFile);
@@ -396,15 +436,34 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
   const headers: Record<string, string> = {};
   if (req.headers?.referer) headers.Referer = req.headers.referer;
   if (req.headers?.userAgent) headers['User-Agent'] = req.headers.userAgent;
+  if (startBytes > 0) headers.Range = `bytes=${startBytes}-`;
 
   let out: fs.WriteStream | null = null;
+  let bytes = startBytes;
   try {
     const resp = await fetch(req.url, { headers, signal: ac.signal, redirect: 'follow' });
+    if (resp.status === 416 && startBytes > 0) {
+      // Диапазон за концом файла — всё уже скачано до паузы
+      jobs.delete(req.jobId);
+      emit({ type: 'job', jobId: req.jobId, state: 'done', progress: 1, bytes: startBytes, outFile });
+      return;
+    }
     if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
     if (!resp.body) throw new Error('пустой ответ сервера');
-    const totalBytes = Number(resp.headers.get('content-length')) || undefined;
-    out = fs.createWriteStream(outFile);
-    let bytes = 0;
+    const appending = startBytes > 0 && resp.status === 206;
+    if (startBytes > 0 && !appending) {
+      // Сервер не умеет Range — честно начинаем сначала
+      startBytes = 0;
+      bytes = 0;
+    }
+    let totalBytes: number | undefined;
+    if (appending) {
+      const m = resp.headers.get('content-range')?.match(/\/(\d+)\s*$/);
+      totalBytes = m ? Number(m[1]) : startBytes + (Number(resp.headers.get('content-length')) || 0) || undefined;
+    } else {
+      totalBytes = Number(resp.headers.get('content-length')) || undefined;
+    }
+    out = fs.createWriteStream(outFile, { flags: appending ? 'a' : 'w' });
     let lastSent = 0;
     for await (const chunk of resp.body) {
       const buf = Buffer.from(chunk as Uint8Array);
@@ -430,6 +489,12 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
   } catch (e) {
     jobs.delete(req.jobId);
     if (out) out.destroy();
+    if (job.paused) {
+      // Недокачанное оставляем — по нему продолжим через Range
+      log('direct paused', req.jobId, bytes, 'bytes');
+      emit({ type: 'job', jobId: req.jobId, state: 'paused', progress: null, bytes, outFile });
+      return;
+    }
     // недокачанный файл бесполезен — убираем и при отмене, и при ошибке
     fs.rm(outFile, { force: true }, () => {});
     if (job.canceled) {
@@ -472,9 +537,9 @@ function startYtdlp(req: YtdlpJobRequest): void {
     '--concurrent-fragments', HLS_CONCURRENCY,
   ];
   let presetOutFile = '';
-  if (req.filenameStem) {
-    // Имя собрано расширением — защищаем от перезаписи как все загрузки
-    presetOutFile = uniquePath(outDir, req.filenameStem + (streams === 'audio' ? '.m4a' : '.mp4'));
+  if (req.resumePath || req.filenameStem) {
+    // Резюм продолжает тот же файл; новое имя защищаем от перезаписи
+    presetOutFile = req.resumePath ?? uniquePath(outDir, req.filenameStem + (streams === 'audio' ? '.m4a' : '.mp4'));
     args.push('-o', presetOutFile);
     // Контейнер в имени обещан — держим слово, даже если лучший кодек в webm
     if (streams === 'both') args.push('--merge-output-format', 'mp4');
@@ -514,8 +579,14 @@ function startYtdlp(req: YtdlpJobRequest): void {
   });
 
   child.on('close', (code) => {
-    log('yt-dlp exit', req.jobId, code, 'canceled:', job.canceled);
-    jobDone(req.jobId, code, job.canceled, outFile, errTail);
+    log('yt-dlp exit', req.jobId, code, 'canceled:', job.canceled, 'paused:', job.paused);
+    if (job.paused) {
+      jobs.delete(req.jobId);
+      // Без preset-имени резюм перезапустит yt-dlp — тот сам подхватит свои .part
+      emit({ type: 'job', jobId: req.jobId, state: 'paused', progress: null, outFile: presetOutFile || undefined });
+    } else {
+      jobDone(req.jobId, code, job, outFile, errTail);
+    }
   });
 }
 
@@ -631,7 +702,7 @@ function startThumbnail(req: ThumbnailJobRequest): void {
       emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: 'У страницы не нашлось обложки' });
       return;
     }
-    jobDone(req.jobId, code, job.canceled, outFile, errTail);
+    jobDone(req.jobId, code, { canceled: job.canceled }, outFile, errTail);
   });
 }
 
@@ -878,6 +949,14 @@ function cancel(jobId: string): void {
   job.kill();
 }
 
+function pause(jobId: string): void {
+  const job = jobs.get(jobId);
+  if (!job) return;
+  job.paused = true;
+  log('pause', jobId);
+  job.kill();
+}
+
 process.on('uncaughtException', (e) => log('uncaught', e.stack ?? e.message));
 
 readMessages((raw) => {
@@ -919,6 +998,13 @@ readMessages((raw) => {
       break;
     case 'cancel':
       cancel(msg.jobId);
+      break;
+    case 'pause':
+      pause(msg.jobId);
+      break;
+    case 'cleanup_partials':
+      // Отмена паузы: убрать недокачанный файл и хвосты yt-dlp
+      cleanupPartials(msg.path);
       break;
     case 'update':
       void runUpdate(msg);

@@ -27,7 +27,12 @@
         <button id="browse-dir" type="button" class="ghost-btn">Обзор…</button>
       </span>
     </label>
-    <a id="version" class="version" target="_blank" rel="noreferrer"></a>
+    <div class="settings-foot">
+      <a id="version" class="version" target="_blank" rel="noreferrer"></a>
+      <label class="ask-dir" title="Выбирать папку перед каждой загрузкой">
+        <input type="checkbox" id="ask-dir"> Спрашивать каждый раз
+      </label>
+    </div>
   </div>
 
   <section id="media-section">
@@ -52,7 +57,7 @@
     <div class="ytdlp-row" id="ytdlp-row">
       <button id="ytdlp-page">Скачать страницу через yt-dlp</button>
       <select id="ytdlp-streams" title="Какие дорожки сохранить">
-        <option value="both">видео+звук</option>
+        <option value="both">видео + звук</option>
         <option value="video">видео</option>
         <option value="audio">звук</option>
       </select>

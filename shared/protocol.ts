@@ -15,6 +15,8 @@ export interface HlsJobRequest {
   outDir?: string;
   /** По умолчанию 'both' */
   streams?: StreamSelection;
+  /** Резюм после паузы: точный путь недокачанного файла (без uniquePath) */
+  resumePath?: string;
   headers?: {
     referer?: string;
     userAgent?: string;
@@ -32,6 +34,8 @@ export interface DirectJobRequest {
   outDir?: string;
   /** По умолчанию 'both' */
   streams?: StreamSelection;
+  /** Резюм после паузы: докачиваем этот файл через HTTP Range */
+  resumePath?: string;
   headers?: {
     referer?: string;
     userAgent?: string;
@@ -53,6 +57,8 @@ export interface YtdlpJobRequest {
   filenameStem?: string;
   /** Планка качества: не выше этой высоты (720, 1080, …). Нет — лучшее. */
   maxHeight?: number;
+  /** Резюм после паузы: точный путь недокачанного файла (без uniquePath) */
+  resumePath?: string;
 }
 
 /** Скачать только обложку страницы (yt-dlp --write-thumbnail, конверт в jpg) */
@@ -95,6 +101,18 @@ export interface ProbeEvent {
 export interface CancelRequest {
   type: 'cancel';
   jobId: string;
+}
+
+/** Пауза: убить процесс, но оставить недокачанное на диске для резюма */
+export interface PauseRequest {
+  type: 'pause';
+  jobId: string;
+}
+
+/** Прибрать хвосты отменённой паузы (.part, .ytdl и сам файл) */
+export interface CleanupPartialsRequest {
+  type: 'cleanup_partials';
+  path: string;
 }
 
 export interface PingRequest {
@@ -141,6 +159,8 @@ export type CoAppRequest =
   | ThumbnailJobRequest
   | ProbeRequest
   | CancelRequest
+  | PauseRequest
+  | CleanupPartialsRequest
   | PingRequest
   | PickDirRequest
   | ThumbRequest
@@ -172,7 +192,7 @@ export interface HeartbeatEvent {
   type: 'heartbeat';
 }
 
-export type JobState = 'running' | 'done' | 'error' | 'canceled';
+export type JobState = 'running' | 'done' | 'error' | 'canceled' | 'paused';
 
 export interface JobEvent {
   type: 'job';
