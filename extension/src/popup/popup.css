@@ -55,6 +55,9 @@
 
 * { box-sizing: border-box; }
 
+/* Атрибут hidden должен побеждать любой display из классов */
+[hidden] { display: none !important; }
+
 body {
   width: 400px;
   margin: 0;

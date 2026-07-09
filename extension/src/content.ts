@@ -9,6 +9,7 @@ interface DomMediaEntry {
 
 const reported = new Map<string, string | undefined>(); // url -> отправленный thumb
 let sentPageThumb: string | undefined;
+let sentMseKey = 'no'; // 'no' | 'yes' | 'thumb' — что уже сообщили про MSE-видео
 
 function absUrl(raw: string): string | null {
   try {
@@ -59,6 +60,15 @@ function mediaThumb(el: HTMLElement): string | undefined {
   return captureFrame(video);
 }
 
+/** Видео, играющее через MSE (blob:) — файл руками не взять, но yt-dlp справится. */
+function mseVideo(): { thumb?: string } | null {
+  for (const v of document.querySelectorAll('video')) {
+    const src = v.currentSrc || v.src || '';
+    if (src.startsWith('blob:')) return { thumb: mediaThumb(v) };
+  }
+  return null;
+}
+
 function collect(): void {
   const media: DomMediaEntry[] = [];
   const els = document.querySelectorAll<HTMLElement>('video, audio, source');
@@ -75,12 +85,18 @@ function collect(): void {
   }
   const pt = pageThumb();
   const pageThumbChanged = pt !== sentPageThumb;
-  if (media.length || pageThumbChanged) {
+  const mse = mseVideo();
+  const mseKey = mse ? (mse.thumb ? 'thumb' : 'yes') : 'no';
+  // Про MSE сообщаем при появлении и когда дозрело превью; исчезновение не откатываем
+  const mseChanged = mse != null && mseKey !== sentMseKey && sentMseKey !== 'thumb';
+  if (media.length || pageThumbChanged || mseChanged) {
     sentPageThumb = pt;
+    if (mseChanged) sentMseKey = mseKey;
     void chrome.runtime
       .sendMessage({
         type: 'dom-media',
         media,
+        mseVideo: mseChanged ? mse : undefined,
         pageThumb: pt,
         pageTitle: document.title,
         pageUrl: location.href,

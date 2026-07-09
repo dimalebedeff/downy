@@ -16,15 +16,27 @@ const tabMedia = new Map<number, Map<string, MediaItem>>();
 const tabVariantUrls = new Map<number, Set<string>>();
 // Обложка страницы (og:image) — превью-фолбэк для медиа, найденного по сети
 const tabPageThumb = new Map<number, string>();
+// Страницы с MSE-видео (blob:) — файл по сети не взять, предлагаем yt-dlp
+interface PageVideo {
+  url: string;
+  title?: string;
+  thumb?: string;
+}
+const tabPageVideo = new Map<number, PageVideo>();
 const jobs = new Map<string, JobInfo>();
 const inflightHls = new Set<string>();
 
 // Service worker может быть выгружен в любой момент — состояние живёт в storage.session
 const restored: Promise<void> = (async () => {
-  const data = await chrome.storage.session.get(['tabMedia', 'jobs', 'tabVariantUrls', 'tabPageThumb']);
+  const data = await chrome.storage.session.get(['tabMedia', 'jobs', 'tabVariantUrls', 'tabPageThumb', 'tabPageVideo']);
   if (data.tabPageThumb) {
     for (const [tabId, thumb] of Object.entries(data.tabPageThumb as Record<string, string>)) {
       tabPageThumb.set(Number(tabId), thumb);
+    }
+  }
+  if (data.tabPageVideo) {
+    for (const [tabId, pv] of Object.entries(data.tabPageVideo as Record<string, PageVideo>)) {
+      tabPageVideo.set(Number(tabId), pv);
     }
   }
   if (data.tabMedia) {
@@ -63,6 +75,7 @@ function persist(): void {
       tabMedia: tm,
       tabVariantUrls: tv,
       tabPageThumb: Object.fromEntries(tabPageThumb),
+      tabPageVideo: Object.fromEntries(tabPageVideo),
       jobs: Object.fromEntries(jobs),
     });
   }, 300);
@@ -81,6 +94,7 @@ function clearTab(tabId: number): void {
   tabMedia.delete(tabId);
   tabVariantUrls.delete(tabId);
   tabPageThumb.delete(tabId);
+  tabPageVideo.delete(tabId);
   persist();
 }
 
@@ -547,6 +561,17 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
           tabPageThumb.set(tabId, pageThumb);
           persist();
         }
+        const mse = msg.mseVideo as { thumb?: string } | undefined;
+        const pageUrl = msg.pageUrl as string | undefined;
+        if (mse && pageUrl) {
+          const prev = tabPageVideo.get(tabId);
+          tabPageVideo.set(tabId, {
+            url: pageUrl,
+            title: pageTitle ?? prev?.title,
+            thumb: mse.thumb ?? prev?.thumb,
+          });
+          persist();
+        }
         for (const entry of (msg.media ?? []) as { url: string; thumb?: string }[]) {
           const kind = classifyMedia(entry.url);
           if (kind === 'hls') void addHls(tabId, entry.url, pageTitle, entry.thumb);
@@ -568,7 +593,12 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         const tabId = msg.tabId as number;
         const items = [...(tabMedia.get(tabId)?.values() ?? [])].sort((a, b) => a.foundAt - b.foundAt);
         for (const item of items) requestThumb(item);
-        sendResponse({ items, jobs: [...jobs.values()], pageThumb: tabPageThumb.get(tabId) });
+        sendResponse({
+          items,
+          jobs: [...jobs.values()],
+          pageThumb: tabPageThumb.get(tabId),
+          pageVideo: tabPageVideo.get(tabId),
+        });
         break;
       }
       case 'download-direct': {

@@ -20,8 +20,15 @@ const ytdlpRow = $<HTMLDivElement>('#ytdlp-row');
 const footerEl = $<HTMLElement>('footer');
 const kebabMenu = $<HTMLDivElement>('#kebab-menu');
 
+interface PageVideo {
+  url: string;
+  title?: string;
+  thumb?: string;
+}
+
 let activeTab: chrome.tabs.Tab | undefined;
 let pageThumb: string | undefined;
+let pageVideo: PageVideo | undefined;
 let lastItems: MediaItem[] = [];
 let lastJobs: JobInfo[] = [];
 
@@ -80,13 +87,16 @@ function groupUrls(group: MediaGroup): Set<string> {
   return urls;
 }
 
-/** Последняя загрузка этой карточки; активная имеет приоритет над завершённой. */
-function findJob(group: MediaGroup): JobInfo | undefined {
-  const urls = groupUrls(group);
+/** Последняя загрузка по URL; активная имеет приоритет над завершённой. */
+function findJobByUrls(urls: Set<string>): JobInfo | undefined {
   const mine = lastJobs.filter((j) => j.sourceUrl && urls.has(j.sourceUrl));
   return (
     mine.filter((j) => j.state === 'running' || j.state === 'starting').at(-1) ?? mine.at(-1)
   );
+}
+
+function findJob(group: MediaGroup): JobInfo | undefined {
+  return findJobByUrls(groupUrls(group));
 }
 
 // ---------- Кебаб-меню ----------
@@ -127,12 +137,16 @@ document.addEventListener('keydown', (e) => {
 
 function renderMedia(): void {
   const groups = groupMediaItems(lastItems);
-  emptyEl.hidden = groups.length > 0;
-  lastHasMedia = groups.length > 0;
+  // Страница с MSE-видео (ютуб и ко) — своя карточка, если больше ничего не поймали
+  const showPageCard = groups.length === 0 && !!pageVideo?.url;
+  lastHasMedia = groups.length > 0 || showPageCard;
+  emptyEl.hidden = lastHasMedia;
   refreshDot();
 
-  // yt-dlp: звезда пустого экрана, скромная строчка — когда медиа есть
-  if (groups.length === 0) {
+  // yt-dlp: звезда пустого экрана, скромная строчка — когда медиа есть.
+  // Карточка страницы сама качает через yt-dlp — дубль-строчка не нужна.
+  ytdlpRow.hidden = showPageCard;
+  if (!emptyEl.hidden) {
     if (ytdlpRow.parentElement !== emptyEl) emptyEl.append(ytdlpRow);
   } else if (ytdlpRow.parentElement !== footerEl) {
     footerEl.prepend(ytdlpRow);
@@ -140,6 +154,12 @@ function renderMedia(): void {
 
   mediaList.textContent = '';
   const matched = new Set<string>();
+
+  if (showPageCard && pageVideo) {
+    const job = findJobByUrls(new Set([pageVideo.url]));
+    if (job) matched.add(job.jobId);
+    mediaList.append(pageVideoCard(pageVideo, job));
+  }
 
   for (const group of groups) {
     const item = group.primary;
@@ -208,6 +228,89 @@ function renderMedia(): void {
   }
 
   renderTailJobs(lastJobs.filter((j) => !matched.has(j.jobId)));
+}
+
+/** Карточка «на странице есть видео» (MSE/blob) — качаем страницу через yt-dlp. */
+function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'card';
+
+  const thumbBox = document.createElement('div');
+  thumbBox.className = 'thumb';
+  const thumbSrc = pv.thumb ?? pageThumb;
+  if (thumbSrc) {
+    const img = document.createElement('img');
+    img.src = thumbSrc;
+    img.alt = '';
+    img.addEventListener('error', () => img.remove());
+    thumbBox.append(img);
+  } else {
+    thumbBox.textContent = '🎬';
+  }
+
+  const body = document.createElement('div');
+  body.className = 'card-body';
+
+  const title = document.createElement('div');
+  title.className = 'card-title';
+  title.textContent = pv.title?.trim() || pv.url;
+  title.title = pv.url;
+  body.append(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'card-meta';
+  meta.textContent = 'Видео на странице · скачаю через yt-dlp';
+  body.append(meta);
+
+  if (job && (job.state === 'running' || job.state === 'starting')) {
+    body.append(jobLine(job));
+  } else if (job && job.state === 'done') {
+    body.append(doneLine(job));
+  } else {
+    if (job && job.state === 'error' && job.message) {
+      const msg = document.createElement('div');
+      msg.className = 'job-msg';
+      msg.textContent = job.message.slice(0, 300);
+      body.append(msg);
+    }
+
+    const row = document.createElement('div');
+    row.className = 'card-actions';
+
+    const btn = document.createElement('button');
+    btn.className = 'primary';
+    btn.textContent = 'Скачать';
+    const start = async (streams: StreamSelection): Promise<void> => {
+      btn.disabled = true;
+      const res = await chrome.runtime.sendMessage({
+        type: 'download-ytdlp',
+        pageUrl: pv.url,
+        pageTitle: pv.title,
+        streams,
+      });
+      if (!res?.ok) showError(res?.error ?? 'Помощник недоступен');
+      setTimeout(() => (btn.disabled = false), 1500);
+    };
+    btn.addEventListener('click', () => void start('both'));
+
+    const kebab = document.createElement('button');
+    kebab.className = 'kebab';
+    kebab.textContent = '⋮';
+    kebab.title = 'Ещё';
+    kebab.addEventListener('click', () => {
+      openKebab(kebab, [
+        { label: 'Скачать только видео', run: () => void start('video') },
+        { label: 'Скачать только звук', run: () => void start('audio') },
+        { label: 'Копировать ссылку', run: () => void navigator.clipboard.writeText(pv.url) },
+      ]);
+    });
+
+    row.append(btn, kebab);
+    body.append(row);
+  }
+
+  li.append(thumbBox, body);
+  return li;
 }
 
 /** Ряд действий: качество (если есть варианты), «Скачать», кебаб. */
@@ -494,6 +597,7 @@ async function refresh(): Promise<void> {
   if (activeTab?.id == null) return;
   const res = await chrome.runtime.sendMessage({ type: 'get-media', tabId: activeTab.id });
   pageThumb = res?.pageThumb;
+  pageVideo = res?.pageVideo;
   lastItems = res?.items ?? [];
   lastJobs = res?.jobs ?? [];
   renderMedia();
