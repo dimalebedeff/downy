@@ -564,11 +564,13 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         const mse = msg.mseVideo as { thumb?: string } | undefined;
         const pageUrl = msg.pageUrl as string | undefined;
         if (mse && pageUrl) {
+          // Наследуем title/thumb только той же страницы: SPA мог сменить ролик
           const prev = tabPageVideo.get(tabId);
+          const samePage = prev?.url === pageUrl;
           tabPageVideo.set(tabId, {
             url: pageUrl,
-            title: pageTitle ?? prev?.title,
-            thumb: mse.thumb ?? prev?.thumb,
+            title: pageTitle ?? (samePage ? prev?.title : undefined),
+            thumb: mse.thumb ?? (samePage ? prev?.thumb : undefined),
           });
           persist();
         }

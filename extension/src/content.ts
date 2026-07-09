@@ -10,6 +10,7 @@ interface DomMediaEntry {
 const reported = new Map<string, string | undefined>(); // url -> отправленный thumb
 let sentPageThumb: string | undefined;
 let sentMseKey = 'no'; // 'no' | 'yes' | 'thumb' — что уже сообщили про MSE-видео
+let mseHref = location.href; // SPA меняет ролик без перезагрузки — начинаем сначала
 
 function absUrl(raw: string): string | null {
   try {
@@ -85,6 +86,10 @@ function collect(): void {
   }
   const pt = pageThumb();
   const pageThumbChanged = pt !== sentPageThumb;
+  if (location.href !== mseHref) {
+    mseHref = location.href;
+    sentMseKey = 'no';
+  }
   const mse = mseVideo();
   const mseKey = mse ? (mse.thumb ? 'thumb' : 'yes') : 'no';
   // Про MSE сообщаем при появлении и когда дозрело превью; исчезновение не откатываем

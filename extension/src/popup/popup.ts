@@ -628,6 +628,7 @@ async function init(): Promise<void> {
   window.addEventListener('unload', () => clearInterval(mediaPoll));
 
   statusDot.addEventListener('click', () => {
+    if (!statusBanner.textContent) return; // статус ещё не доехал — нечего показывать
     statusBanner.hidden = !statusBanner.hidden;
   });
 
