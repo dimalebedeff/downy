@@ -25,6 +25,7 @@ cpSync(ext('manifest.json'), ext('dist/manifest.json'));
 cpSync(ext('src/popup/popup.html'), ext('dist/popup.html'));
 cpSync(ext('src/popup/popup.css'), ext('dist/popup.css'));
 cpSync(ext('icons'), ext('dist/icons'), { recursive: true });
+cpSync(ext('fonts'), ext('dist/fonts'), { recursive: true });
 
 // --- CoApp ---
 await build({

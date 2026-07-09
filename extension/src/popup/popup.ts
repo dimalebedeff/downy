@@ -4,17 +4,26 @@ import { fmtSize, jobProgressView } from '../lib/progress';
 import { groupMediaItems } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
 
+type MediaGroup = ReturnType<typeof groupMediaItems>[number];
+
 const $ = <T extends HTMLElement>(sel: string): T => document.querySelector(sel) as T;
 
 const mediaList = $<HTMLUListElement>('#media-list');
 const emptyEl = $<HTMLDivElement>('#empty');
 const jobsSection = $<HTMLElement>('#jobs-section');
 const jobsList = $<HTMLUListElement>('#jobs-list');
-const coappStatusEl = $<HTMLSpanElement>('#coapp-status');
+const statusDot = $<HTMLButtonElement>('#status-dot');
+const statusBanner = $<HTMLDivElement>('#status-banner');
+const settingsPanel = $<HTMLDivElement>('#settings-panel');
 const outDirInput = $<HTMLInputElement>('#out-dir');
+const ytdlpRow = $<HTMLDivElement>('#ytdlp-row');
+const footerEl = $<HTMLElement>('footer');
+const kebabMenu = $<HTMLDivElement>('#kebab-menu');
 
 let activeTab: chrome.tabs.Tab | undefined;
 let pageThumb: string | undefined;
+let lastItems: MediaItem[] = [];
+let lastJobs: JobInfo[] = [];
 
 function fmtDuration(sec?: number): string {
   if (!sec) return '';
@@ -23,20 +32,6 @@ function fmtDuration(sec?: number): string {
   const s = Math.round(sec % 60);
   const mm = h ? String(m).padStart(2, '0') : String(m);
   return `${h ? h + ':' : ''}${mm}:${String(s).padStart(2, '0')}`;
-}
-
-/** Селектор «что качать»: видео+звук / только видео / только звук */
-function streamsSelect(): HTMLSelectElement {
-  const select = document.createElement('select');
-  select.className = 'streams';
-  select.title = 'Какие дорожки сохранить';
-  for (const [value, label] of [['both', 'видео+звук'], ['video', 'видео'], ['audio', 'звук']]) {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = label;
-    select.append(opt);
-  }
-  return select;
 }
 
 function itemTitle(item: MediaItem): string {
@@ -48,18 +43,100 @@ function itemTitle(item: MediaItem): string {
   }
 }
 
-function renderMedia(items: MediaItem[]): void {
-  mediaList.textContent = '';
-  const groups = groupMediaItems(items);
+// ---------- Статус помощника ----------
+
+function setStatus(kind: 'ok' | 'warn' | 'err' | 'unknown', text: string): void {
+  statusDot.className = `dot dot-${kind}`;
+  statusDot.title = kind === 'ok' ? 'Помощник на связи' : 'Состояние помощника — нажми';
+  statusBanner.textContent = text;
+  statusBanner.classList.toggle('err', kind === 'err');
+  // Про беду говорим сразу, про хорошее — только по клику на точку
+  if (kind === 'err' || kind === 'warn') statusBanner.hidden = false;
+}
+
+function showError(text: string): void {
+  setStatus('err', text);
+}
+
+// ---------- Сопоставление карточка ↔ загрузка ----------
+
+function groupUrls(group: MediaGroup): Set<string> {
+  const urls = new Set<string>([group.primary.url]);
+  for (const m of group.members) urls.add(m.url);
+  for (const v of group.primary.variants ?? []) urls.add(v.url);
+  return urls;
+}
+
+/** Последняя загрузка этой карточки; активная имеет приоритет над завершённой. */
+function findJob(group: MediaGroup): JobInfo | undefined {
+  const urls = groupUrls(group);
+  const mine = lastJobs.filter((j) => j.sourceUrl && urls.has(j.sourceUrl));
+  return (
+    mine.filter((j) => j.state === 'running' || j.state === 'starting').at(-1) ?? mine.at(-1)
+  );
+}
+
+// ---------- Кебаб-меню ----------
+
+function closeKebab(): void {
+  kebabMenu.hidden = true;
+}
+
+function openKebab(anchor: HTMLElement, actions: { label: string; run: () => void }[]): void {
+  kebabMenu.textContent = '';
+  for (const a of actions) {
+    const b = document.createElement('button');
+    b.textContent = a.label;
+    b.addEventListener('click', () => {
+      closeKebab();
+      a.run();
+    });
+    kebabMenu.append(b);
+  }
+  kebabMenu.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  const left = Math.max(8, Math.min(rect.right - kebabMenu.offsetWidth, window.innerWidth - kebabMenu.offsetWidth - 8));
+  const top = Math.min(rect.bottom + 4, window.innerHeight - kebabMenu.offsetHeight - 8);
+  kebabMenu.style.left = `${left}px`;
+  kebabMenu.style.top = `${top}px`;
+}
+
+document.addEventListener('click', (e) => {
+  if (!kebabMenu.hidden && !kebabMenu.contains(e.target as Node) && !(e.target as HTMLElement).closest?.('.kebab')) {
+    closeKebab();
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeKebab();
+});
+
+// ---------- Карточки медиа ----------
+
+function renderMedia(): void {
+  const groups = groupMediaItems(lastItems);
   emptyEl.hidden = groups.length > 0;
+
+  // yt-dlp: звезда пустого экрана, скромная строчка — когда медиа есть
+  if (groups.length === 0) {
+    if (ytdlpRow.parentElement !== emptyEl) emptyEl.append(ytdlpRow);
+  } else if (ytdlpRow.parentElement !== footerEl) {
+    footerEl.prepend(ytdlpRow);
+  }
+
+  mediaList.textContent = '';
+  const matched = new Set<string>();
+
   for (const group of groups) {
     const item = group.primary;
-    const li = document.createElement('li');
-    li.className = 'item';
+    const job = findJob(group);
+    if (job) matched.add(job.jobId);
 
-    const thumbSrc = item.thumb ?? pageThumb;
+    const li = document.createElement('li');
+    li.className = 'card';
+
     const thumbBox = document.createElement('div');
     thumbBox.className = 'thumb';
+    const thumbSrc = item.thumb ?? pageThumb;
     if (thumbSrc) {
       const img = document.createElement('img');
       img.src = thumbSrc;
@@ -69,80 +146,171 @@ function renderMedia(items: MediaItem[]): void {
     } else {
       thumbBox.textContent = item.kind !== 'direct' || item.contentType?.startsWith('video') ? '🎬' : '🎵';
     }
+    const duration = fmtDuration(item.durationSec);
+    if (duration) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = duration;
+      thumbBox.append(badge);
+    }
 
     const body = document.createElement('div');
-    body.className = 'item-body';
+    body.className = 'card-body';
 
-    const row1 = document.createElement('div');
-    row1.className = 'row1';
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.textContent =
-      item.kind === 'hls' ? 'HLS'
-      : item.kind === 'dash' ? 'DASH'
-      : (item.contentType?.split('/')[1] ?? 'файл').toUpperCase().slice(0, 5);
-    const title = document.createElement('span');
-    title.className = 'title';
+    const title = document.createElement('div');
+    title.className = 'card-title';
     title.textContent = itemTitle(item);
-    title.title = item.url;
-    row1.append(chip, title);
+    // Инженерное — в тултип: URL и формат потока
+    const kindLabel = item.kind === 'hls' ? 'HLS' : item.kind === 'dash' ? 'DASH' : item.contentType ?? '';
+    title.title = [item.url, kindLabel].filter(Boolean).join('\n');
+    body.append(title);
 
-    const row2 = document.createElement('div');
-    row2.className = 'row2';
-    const meta = document.createElement('span');
-    meta.className = 'meta';
-    const parts: string[] = [];
-    if (item.size) parts.push(fmtSize(item.size));
-    if (item.durationSec) parts.push(fmtDuration(item.durationSec));
-    if (item.kind === 'hls' && item.variants?.length) parts.push(`${item.variants.length} кач.`);
-    if (item.contentType) parts.push(item.contentType.split(';')[0]);
-    meta.textContent = parts.join(' · ');
-    row2.append(meta);
-
-    let select: HTMLSelectElement | null = null;
-    if (item.kind === 'hls' && item.variants && item.variants.length > 0) {
-      select = document.createElement('select');
-      for (const v of item.variants) {
-        const opt = document.createElement('option');
-        opt.value = v.url;
-        opt.textContent = v.label;
-        select.append(opt);
-      }
-      row2.append(select);
-    } else if (item.kind === 'direct' && group.members.length > 1) {
-      // Варианты одного видео (разные качества) — один пункт с выбором
-      select = document.createElement('select');
-      for (const [i, m] of group.members.entries()) {
-        const opt = document.createElement('option');
-        opt.value = m.url;
-        opt.textContent = fmtSize(m.size) || m.contentType?.split('/')[1] || `вариант ${i + 1}`;
-        select.append(opt);
-      }
-      row2.append(select);
+    const metaParts: string[] = [];
+    if (item.size) metaParts.push(fmtSize(item.size));
+    if (metaParts.length) {
+      const meta = document.createElement('div');
+      meta.className = 'card-meta';
+      meta.textContent = metaParts.join(' · ');
+      body.append(meta);
     }
 
-    // Для видео можно выбрать, какие дорожки сохранять
-    let streams: HTMLSelectElement | null = null;
-    if (item.kind !== 'direct' || isProbablyVideo(item.url, item.contentType)) {
-      streams = streamsSelect();
-      row2.append(streams);
+    if (job && (job.state === 'running' || job.state === 'starting')) {
+      body.append(jobLine(job));
+    } else if (job && job.state === 'done') {
+      body.append(doneLine(job));
+    } else {
+      if (job && job.state === 'error' && job.message) {
+        const msg = document.createElement('div');
+        msg.className = 'job-msg';
+        msg.textContent = job.message.slice(0, 300);
+        body.append(msg);
+      }
+      body.append(actionsRow(group));
     }
 
-    const btn = document.createElement('button');
-    btn.textContent = 'Скачать';
-    btn.addEventListener('click', () => {
-      const chosen =
-        item.kind === 'direct' && select
-          ? group.members.find((m) => m.url === select!.value) ?? item
-          : item;
-      void download(chosen, item.kind === 'hls' ? select : null, (streams?.value as StreamSelection) ?? 'both', btn);
-    });
-    row2.append(btn);
-
-    body.append(row1, row2);
     li.append(thumbBox, body);
     mediaList.append(li);
   }
+
+  renderTailJobs(lastJobs.filter((j) => !matched.has(j.jobId)));
+}
+
+/** Ряд действий: качество (если есть варианты), «Скачать», кебаб. */
+function actionsRow(group: MediaGroup): HTMLDivElement {
+  const item = group.primary;
+  const row = document.createElement('div');
+  row.className = 'card-actions';
+
+  let select: HTMLSelectElement | null = null;
+  if (item.kind === 'hls' && item.variants && item.variants.length > 0) {
+    select = document.createElement('select');
+    select.title = 'Качество';
+    for (const v of item.variants) {
+      const opt = document.createElement('option');
+      opt.value = v.url;
+      opt.textContent = v.label;
+      select.append(opt);
+    }
+  } else if (item.kind === 'direct' && group.members.length > 1) {
+    // Варианты одного видео (разные качества) — один пункт с выбором
+    select = document.createElement('select');
+    select.title = 'Вариант файла';
+    for (const [i, m] of group.members.entries()) {
+      const opt = document.createElement('option');
+      opt.value = m.url;
+      opt.textContent = fmtSize(m.size) || m.contentType?.split('/')[1] || `вариант ${i + 1}`;
+      select.append(opt);
+    }
+  }
+
+  const chosen = (): MediaItem =>
+    item.kind === 'direct' && select
+      ? group.members.find((m) => m.url === select.value) ?? item
+      : item;
+
+  const btn = document.createElement('button');
+  btn.className = 'primary';
+  btn.textContent = 'Скачать';
+  const start = (streams: StreamSelection): void => {
+    void download(chosen(), item.kind === 'hls' ? select : null, streams, btn);
+  };
+  btn.addEventListener('click', () => start('both'));
+
+  const kebab = document.createElement('button');
+  kebab.className = 'kebab';
+  kebab.textContent = '⋮';
+  kebab.title = 'Ещё';
+  const isVideo = item.kind !== 'direct' || isProbablyVideo(item.url, item.contentType);
+  kebab.addEventListener('click', () => {
+    const actions: { label: string; run: () => void }[] = [];
+    if (isVideo) {
+      actions.push(
+        { label: 'Скачать только видео', run: () => start('video') },
+        { label: 'Скачать только звук', run: () => start('audio') },
+      );
+    }
+    actions.push({
+      label: 'Копировать ссылку',
+      run: () => void navigator.clipboard.writeText(item.kind === 'hls' && select ? select.value : chosen().url),
+    });
+    openKebab(kebab, actions);
+  });
+
+  row.append(btn);
+  if (select) row.append(select);
+  row.append(kebab);
+  return row;
+}
+
+/** Живая загрузка: дышащая жёлтым шкала, проценты, отмена. */
+function jobLine(job: JobInfo): HTMLDivElement {
+  const line = document.createElement('div');
+  line.className = 'job-line';
+
+  const bar = document.createElement('div');
+  bar.className = 'bar live';
+  const fill = document.createElement('div');
+  fill.className = 'bar-fill';
+  const { text, ratio } = jobProgressView(job);
+  if (ratio != null) fill.style.width = `${Math.round(ratio * 100)}%`;
+  else fill.classList.add('indeterminate');
+  bar.append(fill);
+
+  const label = document.createElement('span');
+  label.className = 'job-text';
+  label.textContent = text;
+
+  const cancel = document.createElement('button');
+  cancel.className = 'cancel-btn';
+  cancel.textContent = '✕';
+  cancel.title = 'Отменить';
+  cancel.addEventListener('click', () => {
+    void chrome.runtime.sendMessage({ type: 'cancel-job', jobId: job.jobId });
+  });
+
+  line.append(bar, label, cancel);
+  return line;
+}
+
+function doneLine(job: JobInfo): HTMLDivElement {
+  const line = document.createElement('div');
+  line.className = 'job-line';
+  const label = document.createElement('span');
+  label.className = 'job-text done';
+  label.textContent = job.bytes ? `Готово · ${fmtSize(job.bytes)}` : 'Готово';
+  line.append(label);
+  if (job.outFile) {
+    const show = document.createElement('button');
+    show.className = 'link-btn show-btn';
+    show.textContent = 'Показать в папке';
+    show.title = job.outFile;
+    show.addEventListener('click', async () => {
+      const res = await chrome.runtime.sendMessage({ type: 'show-in-folder', path: job.outFile });
+      if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку');
+    });
+    line.append(show);
+  }
+  return line;
 }
 
 async function download(
@@ -160,7 +328,7 @@ async function download(
       const variantUrl = select?.value;
       const variantLabel = select?.selectedOptions[0]?.textContent ?? undefined;
       const res = await chrome.runtime.sendMessage({ type: 'download-hls', item, variantUrl, variantLabel, streams });
-      if (!res?.ok) showError(res?.error ?? 'CoApp недоступен');
+      if (!res?.ok) showError(res?.error ?? 'Помощник недоступен');
     }
   } finally {
     setTimeout(() => (btn.disabled = false), 1000);
@@ -224,28 +392,33 @@ function onUpdateProgress(state: string, message?: string): void {
   }
 }
 
-function renderJobs(jobs: JobInfo[]): void {
-  hasActiveJobs = jobs.some((j) => j.state === 'running' || j.state === 'starting');
+// ---------- Хвосты: загрузки без карточки (другие вкладки, yt-dlp, старое) ----------
+
+function renderTailJobs(jobs: JobInfo[]): void {
+  hasActiveJobs = lastJobs.some((j) => j.state === 'running' || j.state === 'starting');
   syncUpdateBtn();
   jobsSection.hidden = jobs.length === 0;
   jobsList.textContent = '';
   for (const job of jobs) {
     const li = document.createElement('li');
-    li.className = 'job';
+    li.className = 'tail-job';
 
     const row = document.createElement('div');
-    row.className = 'row1';
+    row.className = 'tail-row';
     const title = document.createElement('span');
-    title.className = 'title';
+    title.className = 'tail-title';
     title.textContent = job.label;
     title.title = job.outFile ?? job.label;
     const state = document.createElement('span');
-    state.className = `job-state ${job.state}`;
+    state.className = 'job-text';
     if (job.state === 'done') {
+      state.classList.add('done');
       state.textContent = job.bytes ? `готово · ${fmtSize(job.bytes)}` : 'готово';
     } else if (job.state === 'error') {
+      state.classList.add('err');
       state.textContent = 'ошибка';
     } else if (job.state === 'canceled') {
+      state.classList.add('err');
       state.textContent = 'отменено';
     } else {
       state.textContent = jobProgressView(job).text;
@@ -278,12 +451,14 @@ function renderJobs(jobs: JobInfo[]): void {
     li.append(row);
 
     if (job.state === 'running' || job.state === 'starting') {
-      const bar = document.createElement('progress');
+      const bar = document.createElement('div');
+      bar.className = 'bar live';
+      const fill = document.createElement('div');
+      fill.className = 'bar-fill';
       const { ratio } = jobProgressView(job);
-      if (ratio != null) {
-        bar.max = 1;
-        bar.value = ratio;
-      }
+      if (ratio != null) fill.style.width = `${Math.round(ratio * 100)}%`;
+      else fill.classList.add('indeterminate');
+      bar.append(fill);
       li.append(bar);
     }
 
@@ -298,18 +473,15 @@ function renderJobs(jobs: JobInfo[]): void {
   }
 }
 
-function showError(text: string): void {
-  coappStatusEl.className = 'status status-err';
-  coappStatusEl.title = text;
-  coappStatusEl.textContent = 'ошибка';
-}
+// ---------- Инициализация ----------
 
 async function refresh(): Promise<void> {
   if (activeTab?.id == null) return;
   const res = await chrome.runtime.sendMessage({ type: 'get-media', tabId: activeTab.id });
   pageThumb = res?.pageThumb;
-  renderMedia(res?.items ?? []);
-  renderJobs(res?.jobs ?? []);
+  lastItems = res?.items ?? [];
+  lastJobs = res?.jobs ?? [];
+  renderMedia();
 }
 
 async function init(): Promise<void> {
@@ -317,15 +489,28 @@ async function init(): Promise<void> {
   await refresh();
 
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg?.type === 'jobs-updated') renderJobs(msg.jobs ?? []);
+    if (msg?.type === 'jobs-updated') {
+      lastJobs = msg.jobs ?? [];
+      if (kebabMenu.hidden) renderMedia();
+    }
     if (msg?.type === 'update-progress') onUpdateProgress(msg.state, msg.message);
   });
 
   void initUpdater();
 
-  // Пока попап открыт, список может пополняться
-  const mediaPoll = setInterval(() => void refresh(), 2000);
+  // Пока попап открыт, список может пополняться; открытое меню не дёргаем
+  const mediaPoll = setInterval(() => {
+    if (kebabMenu.hidden) void refresh();
+  }, 2000);
   window.addEventListener('unload', () => clearInterval(mediaPoll));
+
+  statusDot.addEventListener('click', () => {
+    statusBanner.hidden = !statusBanner.hidden;
+  });
+
+  $<HTMLButtonElement>('#settings-btn').addEventListener('click', () => {
+    settingsPanel.hidden = !settingsPanel.hidden;
+  });
 
   $<HTMLButtonElement>('#ytdlp-page').addEventListener('click', async (e) => {
     const btn = e.currentTarget as HTMLButtonElement;
@@ -336,13 +521,14 @@ async function init(): Promise<void> {
       pageTitle: activeTab?.title,
       streams: $<HTMLSelectElement>('#ytdlp-streams').value,
     });
-    if (!res?.ok) showError(res?.error ?? 'CoApp недоступен');
+    if (!res?.ok) showError(res?.error ?? 'Помощник недоступен');
     setTimeout(() => (btn.disabled = false), 1500);
   });
 
   $<HTMLButtonElement>('#clear-jobs').addEventListener('click', async () => {
     const res = await chrome.runtime.sendMessage({ type: 'clear-jobs' });
-    renderJobs(res?.jobs ?? []);
+    lastJobs = res?.jobs ?? [];
+    renderMedia();
   });
 
   let defaultOutDir = '';
@@ -371,19 +557,16 @@ async function init(): Promise<void> {
   if (status?.ok) {
     defaultOutDir = status.info?.defaultOutDir ?? '';
     if (!outDirInput.value && defaultOutDir) outDirInput.value = defaultOutDir;
-    coappStatusEl.className = 'status status-ok';
     const missing: string[] = [];
     if (!status.info?.ffmpeg) missing.push('ffmpeg');
     if (!status.info?.ytdlp) missing.push('yt-dlp');
-    coappStatusEl.textContent = missing.length ? `CoApp (нет: ${missing.join(', ')})` : 'CoApp';
-    coappStatusEl.title = missing.length
-      ? `CoApp работает, но не найдены: ${missing.join(', ')}. Запусти npm run coapp:fetch-bins`
-      : `CoApp v${status.info?.version} готов`;
-    if (missing.length) coappStatusEl.className = 'status status-err';
+    if (missing.length) {
+      setStatus('warn', `Помощник работает, но не хватает: ${missing.join(', ')}.\nЗапусти npm run coapp:fetch-bins в папке Downy.`);
+    } else {
+      setStatus('ok', `Помощник Downy v${status.info?.version} на связи — ffmpeg и yt-dlp на месте.`);
+    }
   } else {
-    coappStatusEl.className = 'status status-err';
-    coappStatusEl.textContent = 'CoApp не найден';
-    coappStatusEl.title = `${status?.error ?? ''}\nУстанови: npm run coapp:install`.trim();
+    setStatus('err', `Помощник не отвечает — скачивание работать не будет.\nУстанови его: npm run coapp:install.\n${status?.error ?? ''}`.trim());
   }
 }
 

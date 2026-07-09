@@ -7,12 +7,41 @@
 </head>
 <body>
   <header>
-    <h1>Downy</h1>
-    <span id="coapp-status" class="status status-unknown" title="Проверяю CoApp…">CoApp</span>
+    <div class="brand">
+      <h1>Downy</h1>
+      <button id="status-dot" class="dot dot-unknown" title="Состояние помощника"></button>
+    </div>
+    <button id="settings-btn" class="icon-btn" title="Настройки" aria-label="Настройки">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.09a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
   </header>
 
+  <div id="status-banner" hidden></div>
+
+  <div id="settings-panel" hidden>
+    <label class="field">
+      Папка загрузок
+      <span class="field-row">
+        <input id="out-dir" placeholder="Downloads\downy">
+        <button id="browse-dir" type="button" class="ghost-btn">Обзор…</button>
+      </span>
+    </label>
+    <div id="version" class="version"></div>
+  </div>
+
   <section id="media-section">
-    <div id="empty" hidden>На этой вкладке медиа не найдено</div>
+    <div id="empty" hidden>
+      <div class="empty-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4v12"/><path d="m6 12 6 6 6-6"/><path d="M5 21h14"/>
+        </svg>
+      </div>
+      <p class="empty-title">Медиа на вкладке не нашлось</p>
+      <p class="empty-hint">Бывает. Тогда качаем страницу целиком:</p>
+    </div>
     <ul id="media-list"></ul>
   </section>
 
@@ -23,8 +52,7 @@
   </section>
 
   <footer>
-    <button id="update-btn" hidden></button>
-    <div class="ytdlp-row">
+    <div class="ytdlp-row" id="ytdlp-row">
       <button id="ytdlp-page">Скачать страницу через yt-dlp</button>
       <select id="ytdlp-streams" title="Какие дорожки сохранить">
         <option value="both">видео+звук</option>
@@ -32,18 +60,10 @@
         <option value="audio">звук</option>
       </select>
     </div>
-    <details>
-      <summary>Настройки</summary>
-      <label class="field">
-        Папка загрузок
-        <span class="field-row">
-          <input id="out-dir" placeholder="Downloads\downy">
-          <button id="browse-dir" type="button" title="Выбрать папку">Обзор…</button>
-        </span>
-      </label>
-      <div id="version" class="version"></div>
-    </details>
+    <button id="update-btn" class="primary" hidden></button>
   </footer>
+
+  <div id="kebab-menu" class="menu" hidden></div>
 
   <script src="popup.js"></script>
 </body>

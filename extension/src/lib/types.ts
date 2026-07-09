@@ -23,6 +23,8 @@ export interface MediaItem {
 export interface JobInfo {
   jobId: string;
   label: string;
+  /** URL медиа (или страницы для yt-dlp) — по нему попап находит карточку загрузки */
+  sourceUrl?: string;
   state: 'starting' | 'running' | 'done' | 'error' | 'canceled';
   progress: number | null;
   bytes?: number;

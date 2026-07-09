@@ -406,7 +406,7 @@ async function startHlsJob(
 ): Promise<{ ok: boolean; error?: string }> {
   const jobId = crypto.randomUUID();
   const filename = buildFilename(item, variantLabel, streams);
-  const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null };
+  const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null, sourceUrl: item.url };
   jobs.set(jobId, job);
   const res = sendToCoApp({
     type: 'download_hls',
@@ -429,7 +429,7 @@ async function startHlsJob(
 async function startDirectJob(item: MediaItem, streams: StreamSelection = 'both'): Promise<{ ok: boolean; error?: string }> {
   const jobId = crypto.randomUUID();
   const filename = buildFilename(item, undefined, streams);
-  const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null, totalBytes: streams === 'both' ? item.size : undefined };
+  const job: JobInfo = { jobId, label: filename, state: 'starting', progress: null, totalBytes: streams === 'both' ? item.size : undefined, sourceUrl: item.url };
   jobs.set(jobId, job);
   const res = sendToCoApp({
     type: 'download_direct',
@@ -460,6 +460,7 @@ async function startYtdlpJob(
     label: `yt-dlp: ${pageTitle?.trim() || pageUrl}`,
     state: 'starting',
     progress: null,
+    sourceUrl: pageUrl,
   };
   jobs.set(jobId, job);
   const res = sendToCoApp({ type: 'download_ytdlp', jobId, pageUrl, outDir: await getOutDir(), streams });
