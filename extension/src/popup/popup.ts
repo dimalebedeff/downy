@@ -50,12 +50,12 @@ function setStatus(kind: 'ok' | 'warn' | 'err' | 'unknown', text: string): void 
   statusDot.title = kind === 'ok' ? 'Помощник на связи' : 'Состояние помощника — нажми';
   statusBanner.textContent = text;
   statusBanner.classList.toggle('err', kind === 'err');
-  // Про беду говорим сразу, про хорошее — только по клику на точку
-  if (kind === 'err' || kind === 'warn') statusBanner.hidden = false;
 }
 
+/** Ошибка действия пользователя — показываем сразу, а не только точкой. */
 function showError(text: string): void {
   setStatus('err', text);
+  statusBanner.hidden = false;
 }
 
 // ---------- Сопоставление карточка ↔ загрузка ----------
@@ -568,6 +568,9 @@ async function init(): Promise<void> {
   } else {
     setStatus('err', `Помощник не отвечает — скачивание работать не будет.\nУстанови его: npm run coapp:install.\n${status?.error ?? ''}`.trim());
   }
+  // Пустая вкладка — не повод для баннера: беду показываем сразу,
+  // только когда тут есть что качать. Точка и клик по ней работают всегда.
+  if (!status?.ok && lastItems.length > 0) statusBanner.hidden = false;
 }
 
 void init();
