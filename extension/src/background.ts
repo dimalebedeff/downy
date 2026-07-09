@@ -271,6 +271,8 @@ const pendingPickDir = new Map<string, (res: { dir: string | null; error?: strin
 
 // Запрошенные у CoApp кадры-превью: reqId -> куда положить результат
 const pendingThumbs = new Map<string, { tabId: number; url: string }>();
+// Ожидающие ответа ping (проверка статуса из попапа)
+const pendingPings = new Set<(res: { ok: boolean; info?: PongEvent; error?: string }) => void>();
 // URL, по которым кадр уже запрашивали (успех или отказ) — не долбим ffmpeg повторно
 const thumbTried = new Set<string>();
 
@@ -285,6 +287,11 @@ function getCoAppPort(): chrome.runtime.Port {
       return;
     }
     if (msg.type === 'heartbeat') return; // само получение сбрасывает таймер простоя SW
+    if (msg.type === 'pong') {
+      for (const resolve of pendingPings) resolve({ ok: true, info: msg });
+      pendingPings.clear();
+      return;
+    }
     if (msg.type === 'update') {
       broadcastUpdateProgress(msg.state, msg.message);
       if (msg.state === 'done') {
@@ -329,6 +336,8 @@ function getCoAppPort(): chrome.runtime.Port {
     }
     for (const resolve of pendingPickDir.values()) resolve({ dir: null, error: err ?? 'CoApp отключился' });
     pendingPickDir.clear();
+    for (const resolve of pendingPings) resolve({ ok: false, error: err ?? 'CoApp не установлен' });
+    pendingPings.clear();
     // Дадим шанс перезапросить кадры при следующем открытии попапа
     for (const { url } of pendingThumbs.values()) thumbTried.delete(url);
     pendingThumbs.clear();
@@ -359,31 +368,21 @@ function sendToCoApp(req: CoAppRequest): { ok: boolean; error?: string } {
   }
 }
 
+// Пингуем через основной порт: не плодим второй процесс хоста на каждый попап
 function pingCoApp(): Promise<{ ok: boolean; info?: PongEvent; error?: string }> {
   return new Promise((resolve) => {
-    let port: chrome.runtime.Port;
-    try {
-      port = chrome.runtime.connectNative(NATIVE_HOST);
-    } catch (e) {
-      resolve({ ok: false, error: e instanceof Error ? e.message : String(e) });
-      return;
-    }
-    const timer = setTimeout(() => {
-      port.disconnect();
-      resolve({ ok: false, error: 'CoApp не ответил за 3 секунды' });
-    }, 3000);
-    port.onMessage.addListener((msg: CoAppEvent) => {
-      if (msg.type === 'pong') {
-        clearTimeout(timer);
-        port.disconnect();
-        resolve({ ok: true, info: msg });
-      }
-    });
-    port.onDisconnect.addListener(() => {
+    let settled = false;
+    const done = (res: { ok: boolean; info?: PongEvent; error?: string }): void => {
+      if (settled) return;
+      settled = true;
+      pendingPings.delete(done);
       clearTimeout(timer);
-      resolve({ ok: false, error: chrome.runtime.lastError?.message ?? 'CoApp не установлен' });
-    });
-    port.postMessage({ type: 'ping' } satisfies CoAppRequest);
+      resolve(res);
+    };
+    const timer = setTimeout(() => done({ ok: false, error: 'CoApp не ответил за 3 секунды' }), 3000);
+    pendingPings.add(done);
+    const sent = sendToCoApp({ type: 'ping' });
+    if (!sent.ok) done({ ok: false, error: sent.error ?? 'CoApp не установлен' });
   });
 }
 

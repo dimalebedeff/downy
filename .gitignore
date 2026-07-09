@@ -6,3 +6,4 @@ coapp/run-host.bat
 .claude/settings.local.json
 .scratch/
 *.log
+.update-files.json

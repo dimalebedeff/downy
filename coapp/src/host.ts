@@ -461,6 +461,7 @@ function startYtdlp(req: YtdlpJobRequest): void {
   // Предпочитаем mp4/m4a — их открывает всё; webm/opus только если иного нет
   if (req.streams === 'video') args.push('-f', 'bestvideo[ext=mp4]/bestvideo/best');
   else if (req.streams === 'audio') args.push('-f', 'bestaudio[ext=m4a]/bestaudio/best');
+  else args.push('-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best');
   args.push(req.pageUrl);
 
   log('yt-dlp start', req.jobId, req.pageUrl, 'streams:', req.streams ?? 'both');
@@ -614,6 +615,44 @@ function showInFolder(target: string): void {
 const REPO = 'dimalebedeff/downy';
 // Корень установки (папка с package.json и build.mjs)
 const installRoot = path.join(coappRoot, '..');
+// Список файлов, приехавших из релиза при прошлом обновлении, — чтобы при
+// следующем удалить те, которых в новом релизе больше нет (cpSync сам не удаляет)
+const updateFilesManifest = path.join(installRoot, '.update-files.json');
+
+function listFilesRecursive(dir: string, base = dir): string[] {
+  const out: string[] = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...listFilesRecursive(full, base));
+    else out.push(path.relative(base, full));
+  }
+  return out;
+}
+
+/** Удаляет файлы прошлого релиза, исчезнувшие в новом. Никогда не трогает
+ *  сгенерированное (node_modules, dist, bin, логи) — их в списках релизов нет. */
+function pruneRemovedFiles(newFiles: string[]): void {
+  let prev: string[];
+  try {
+    prev = JSON.parse(fs.readFileSync(updateFilesManifest, 'utf8')) as string[];
+  } catch {
+    prev = []; // первого списка ещё нет — удалять нечего
+  }
+  const fresh = new Set(newFiles);
+  for (const rel of prev) {
+    if (fresh.has(rel)) continue;
+    const target = path.resolve(installRoot, rel);
+    // Страховка от выхода за пределы установки (кривой список и т.п.)
+    if (!target.startsWith(installRoot + path.sep)) continue;
+    try {
+      fs.rmSync(target, { force: true });
+      log('update: pruned', rel);
+    } catch {
+      // занятый файл удалим при следующем обновлении
+    }
+  }
+  fs.writeFileSync(updateFilesManifest, JSON.stringify(newFiles));
+}
 
 function runStep(cmd: string, args: string[], cwd: string): Promise<string | null> {
   return new Promise((resolve) => {
@@ -669,6 +708,9 @@ async function runUpdate(req: UpdateRequest): Promise<void> {
     if (npmErr) throw new Error(`npm install: ${npmErr}`);
     const buildErr = await runStep(process.execPath, ['build.mjs'], installRoot);
     if (buildErr) throw new Error(`сборка: ${buildErr}`);
+
+    // Только после успешной сборки: при провале старые файлы не трогаем
+    pruneRemovedFiles(listFilesRecursive(srcRoot));
 
     // Свежий yt-dlp важен (сайты ломают экстракторы), но его сбой не фатален
     const ytdlpErr = await runStep(ytdlpPath, ['-U'], installRoot);

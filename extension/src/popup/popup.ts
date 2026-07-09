@@ -13,6 +13,7 @@ const mediaList = $<HTMLUListElement>('#media-list');
 const emptyEl = $<HTMLDivElement>('#empty');
 const jobsSection = $<HTMLElement>('#jobs-section');
 const jobsList = $<HTMLUListElement>('#jobs-list');
+const clearJobsBtn = $<HTMLButtonElement>('#clear-jobs');
 const statusDot = $<HTMLButtonElement>('#status-dot');
 const statusBanner = $<HTMLDivElement>('#status-banner');
 const settingsPanel = $<HTMLDivElement>('#settings-panel');
@@ -520,6 +521,7 @@ function renderTailJobs(jobs: JobInfo[]): void {
   hasActiveJobs = lastJobs.some((j) => j.state === 'running' || j.state === 'starting');
   syncUpdateBtn();
   jobsSection.hidden = jobs.length === 0;
+  clearJobsBtn.hidden = !jobs.some((j) => j.state === 'done' || j.state === 'error' || j.state === 'canceled');
   jobsList.textContent = '';
   for (const job of jobs) {
     const li = document.createElement('li');
@@ -649,7 +651,7 @@ async function init(): Promise<void> {
     setTimeout(() => (btn.disabled = false), 1500);
   });
 
-  $<HTMLButtonElement>('#clear-jobs').addEventListener('click', async () => {
+  clearJobsBtn.addEventListener('click', async () => {
     const res = await chrome.runtime.sendMessage({ type: 'clear-jobs' });
     lastJobs = res?.jobs ?? [];
     renderMedia();
