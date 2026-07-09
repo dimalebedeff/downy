@@ -155,7 +155,14 @@ h2 {
   border-radius: 8px;
   background: var(--bg);
 }
-.version { color: var(--muted); font-size: 11px; margin-top: 8px; }
+.version {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 8px;
+  text-decoration: none;
+}
+.version:hover { color: var(--accent-deep); text-decoration: underline; }
 
 /* ---------- Список медиа ---------- */
 

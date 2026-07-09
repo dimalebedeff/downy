@@ -37,7 +37,7 @@ fs.writeFileSync(
   JSON.stringify(
     {
       name: HOST_NAME,
-      description: 'Downy companion app (HLS via ffmpeg, yt-dlp)',
+      description: 'YaDaun companion app (HLS via ffmpeg, yt-dlp)',
       path: batPath,
       type: 'stdio',
       allowed_origins: [`chrome-extension://${extId}/`],

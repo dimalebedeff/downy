@@ -564,7 +564,7 @@ function pickDir(req: PickDirRequest): void {
     '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     'Add-Type -AssemblyName System.Windows.Forms',
     '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
-    "$f.Description = 'Папка загрузок Downy'",
+    "$f.Description = 'Папка загрузок YaDaun'",
     '$f.ShowNewFolderButton = $true',
     'if ($env:DOWNY_CURRENT_DIR -and (Test-Path -LiteralPath $env:DOWNY_CURRENT_DIR)) { $f.SelectedPath = $env:DOWNY_CURRENT_DIR }',
     // TopMost-владелец, иначе диалог откроется позади браузера
