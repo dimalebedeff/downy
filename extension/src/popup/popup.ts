@@ -19,6 +19,7 @@ const statusBanner = $<HTMLDivElement>('#status-banner');
 const settingsPanel = $<HTMLDivElement>('#settings-panel');
 const outDirInput = $<HTMLInputElement>('#out-dir');
 const ytdlpRow = $<HTMLDivElement>('#ytdlp-row');
+const ytdlpBtn = $<HTMLButtonElement>('#ytdlp-page');
 const footerEl = $<HTMLElement>('footer');
 const kebabMenu = $<HTMLDivElement>('#kebab-menu');
 
@@ -152,8 +153,12 @@ function renderMedia(): void {
   ytdlpRow.hidden = showPageCard;
   if (!emptyEl.hidden) {
     if (ytdlpRow.parentElement !== emptyEl) emptyEl.append(ytdlpRow);
-  } else if (ytdlpRow.parentElement !== footerEl) {
-    footerEl.prepend(ytdlpRow);
+    ytdlpBtn.textContent = 'Надавить на сайт';
+    ytdlpBtn.title = 'Скачать страницу через yt-dlp';
+  } else {
+    if (ytdlpRow.parentElement !== footerEl) footerEl.prepend(ytdlpRow);
+    ytdlpBtn.textContent = 'Скачать страницу через yt-dlp';
+    ytdlpBtn.title = '';
   }
 
   mediaList.textContent = '';
@@ -640,7 +645,7 @@ async function init(): Promise<void> {
     settingsPanel.hidden = !settingsPanel.hidden;
   });
 
-  $<HTMLButtonElement>('#ytdlp-page').addEventListener('click', async (e) => {
+  ytdlpBtn.addEventListener('click', async (e) => {
     const btn = e.currentTarget as HTMLButtonElement;
     btn.disabled = true;
     const res = await chrome.runtime.sendMessage({

@@ -1,4 +1,4 @@
-// Генератор иконок расширения: жёлтая стрелка загрузки на тёмно-сером фоне.
+// Генератор иконок расширения: чёрная стрелка загрузки на жёлтом фоне.
 // Без зависимостей — PNG кодируется вручную. Запуск: node extension/gen-icons.mjs
 
 import { deflateSync } from 'node:zlib';
@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url';
 const outDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'icons');
 mkdirSync(outDir, { recursive: true });
 
-const BG = [0x24, 0x27, 0x2c]; // тёмно-серый, в тон тёмной теме попапа
-const FG = [0xf5, 0xc5, 0x18]; // жёлтый
+const BG = [0xf5, 0xc5, 0x18]; // фирменный жёлтый (--accent попапа)
+const FG = [0x1b, 0x1c, 0x20]; // чёрный, в тон тексту на жёлтых кнопках (--accent-ink)
 
 // --- Фигуры в нормализованных координатах [0..1] ---
 
