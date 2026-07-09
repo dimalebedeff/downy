@@ -28,6 +28,37 @@ export function canonicalMediaUrl(url: string): string {
   }
 }
 
+/**
+ * Свежие находки показываем даже при несовпадении pageUrl: медиа следующего
+ * ролика SPA часто детектится до смены адреса и штампуется старой страницей.
+ */
+export const FRESH_FIND_MS = 2 * 60_000;
+
+/** Один ли это адрес страницы (hash не считается: #comment — та же страница). */
+export function samePage(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    ua.hash = '';
+    ub.hash = '';
+    return ua.toString() === ub.toString();
+  } catch {
+    return a === b;
+  }
+}
+
+/**
+ * Отсекает находки с прошлых страниц SPA: показываем медиа текущего адреса
+ * вкладки, без pageUrl (не по чему судить) и свежее FRESH_FIND_MS.
+ */
+export function filterPageItems(items: MediaItem[], currentUrl?: string, now = Date.now()): MediaItem[] {
+  if (!currentUrl) return items;
+  return items.filter(
+    (it) => !it.pageUrl || samePage(it.pageUrl, currentUrl) || now - it.foundAt < FRESH_FIND_MS,
+  );
+}
+
 /** Меньше этого (при известном размере) — скорее всего рекламный джингл/огрызок */
 const MIN_SIZE_BYTES = 300 * 1024;
 

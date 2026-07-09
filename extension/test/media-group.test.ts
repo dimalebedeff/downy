@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalMediaUrl, groupMediaItems } from '../src/lib/media-group';
+import { FRESH_FIND_MS, canonicalMediaUrl, filterPageItems, groupMediaItems, samePage } from '../src/lib/media-group';
 import type { MediaItem } from '../src/lib/types';
 
 const MB = 1024 * 1024;
@@ -83,5 +83,55 @@ describe('groupMediaItems', () => {
     ];
     const groups = groupMediaItems(items);
     expect(groups[0].primary.url).toContain('early');
+  });
+});
+
+describe('samePage', () => {
+  it('одинаковые адреса с разным hash — одна страница', () => {
+    expect(samePage('https://a.io/watch?v=1#t=10', 'https://a.io/watch?v=1')).toBe(true);
+  });
+
+  it('разный query — разные страницы (ютубовский /watch?v=)', () => {
+    expect(samePage('https://a.io/watch?v=1', 'https://a.io/watch?v=2')).toBe(false);
+  });
+
+  it('пустые значения — не судим, отвечаем false', () => {
+    expect(samePage(undefined, 'https://a.io/')).toBe(false);
+    expect(samePage('https://a.io/', undefined)).toBe(false);
+  });
+});
+
+describe('filterPageItems', () => {
+  const NOW = 10 * 60_000;
+
+  it('оставляет медиа текущей страницы, отсекает старьё с прошлой', () => {
+    const items = [
+      item({ url: 'https://cdn.io/old.mp4', pageUrl: 'https://a.io/watch?v=old', foundAt: 0 }),
+      item({ url: 'https://cdn.io/cur.mp4', pageUrl: 'https://a.io/watch?v=cur', foundAt: 0 }),
+    ];
+    const kept = filterPageItems(items, 'https://a.io/watch?v=cur', NOW);
+    expect(kept.map((i) => i.url)).toEqual(['https://cdn.io/cur.mp4']);
+  });
+
+  it('свежую находку с чужим pageUrl не отсекает (гонка с префетчем)', () => {
+    const items = [
+      item({ url: 'https://cdn.io/next.mp4', pageUrl: 'https://a.io/watch?v=old', foundAt: NOW - FRESH_FIND_MS + 1000 }),
+    ];
+    expect(filterPageItems(items, 'https://a.io/watch?v=cur', NOW)).toHaveLength(1);
+  });
+
+  it('без pageUrl не судим — оставляем', () => {
+    const items = [item({ url: 'https://cdn.io/x.mp4', foundAt: 0 })];
+    expect(filterPageItems(items, 'https://a.io/', NOW)).toHaveLength(1);
+  });
+
+  it('hash в адресе вкладки не считается другой страницей', () => {
+    const items = [item({ url: 'https://cdn.io/x.mp4', pageUrl: 'https://a.io/page', foundAt: 0 })];
+    expect(filterPageItems(items, 'https://a.io/page#comments', NOW)).toHaveLength(1);
+  });
+
+  it('адрес вкладки неизвестен — показываем всё', () => {
+    const items = [item({ url: 'https://cdn.io/x.mp4', pageUrl: 'https://a.io/other', foundAt: 0 })];
+    expect(filterPageItems(items, undefined, NOW)).toHaveLength(1);
   });
 });

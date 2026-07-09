@@ -2,7 +2,7 @@ import type { JobInfo, MediaItem } from '../lib/types';
 import type { StreamSelection } from '../../../shared/protocol';
 import { fmtSize, jobProgressView } from '../lib/progress';
 import { REPO } from '../lib/update';
-import { groupMediaItems } from '../lib/media-group';
+import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
 
 type MediaGroup = ReturnType<typeof groupMediaItems>[number];
@@ -138,9 +138,11 @@ document.addEventListener('keydown', (e) => {
 // ---------- Карточки медиа ----------
 
 function renderMedia(): void {
-  const groups = groupMediaItems(lastItems);
+  // SPA меняет ролики без перезагрузки — старьё с прошлых адресов не показываем
+  const groups = groupMediaItems(filterPageItems(lastItems, activeTab?.url));
   // Страница с MSE-видео (ютуб и ко) — своя карточка, если больше ничего не поймали
-  const showPageCard = groups.length === 0 && !!pageVideo?.url;
+  const showPageCard =
+    groups.length === 0 && !!pageVideo?.url && (!activeTab?.url || samePage(pageVideo.url, activeTab.url));
   lastHasMedia = groups.length > 0 || showPageCard;
   emptyEl.hidden = lastHasMedia;
   refreshDot();
