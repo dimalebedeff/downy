@@ -564,7 +564,7 @@ function doneLine(job: JobInfo): HTMLDivElement {
   line.className = 'job-line';
   const label = document.createElement('span');
   label.className = 'job-text done';
-  label.textContent = job.bytes ? fmtSize(job.bytes) : '✓';
+  label.textContent = job.bytes ? fmtSize(job.bytes) : 'готово';
   line.append(label);
   if (job.outFile) {
     const show = document.createElement('button');
@@ -761,7 +761,7 @@ function finishedRow(job: JobInfo): HTMLLIElement {
   state.className = 'job-text';
   if (job.state === 'done') {
     state.classList.add('done');
-    state.textContent = job.bytes ? fmtSize(job.bytes) : '✓';
+    state.textContent = job.bytes ? fmtSize(job.bytes) : 'готово';
   } else if (job.state === 'canceled') {
     state.classList.add('err');
     state.textContent = 'отменено';
