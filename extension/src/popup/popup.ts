@@ -159,8 +159,15 @@ function openKebab(anchor: HTMLElement, actions: { label: string; run: () => voi
   }
   kebabMenu.hidden = false;
   const rect = anchor.getBoundingClientRect();
-  const left = Math.max(8, Math.min(rect.right - kebabMenu.offsetWidth, window.innerWidth - kebabMenu.offsetWidth - 8));
-  const top = Math.min(rect.bottom + 4, window.innerHeight - kebabMenu.offsetHeight - 8);
+  // Границы берём у документа: window.innerWidth в попапе может врать
+  // (зум браузера, окно раздуто позиционированным элементом)
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  const w = kebabMenu.offsetWidth;
+  const h = kebabMenu.offsetHeight;
+  const left = Math.max(8, Math.min(rect.right - w, vw - w - 8));
+  // Снизу не влезает — разворачиваемся вверх от кнопки
+  const top = rect.bottom + 4 + h <= vh - 8 ? rect.bottom + 4 : Math.max(8, rect.top - 4 - h);
   kebabMenu.style.left = `${left}px`;
   kebabMenu.style.top = `${top}px`;
 }

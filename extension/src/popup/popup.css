@@ -597,6 +597,8 @@ footer .ytdlp-row select { flex: none; }
   position: fixed;
   z-index: 20;
   min-width: 160px;
+  /* Страховка: даже при кривом позиционировании меню не шире попапа */
+  max-width: calc(100vw - 16px);
   padding: 4px;
   background: var(--card);
   border: 1px solid var(--border);
