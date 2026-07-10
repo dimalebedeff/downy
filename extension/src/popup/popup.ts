@@ -144,6 +144,8 @@ function findJob(group: MediaGroup): JobInfo | undefined {
 
 function closeKebab(): void {
   kebabMenu.hidden = true;
+  // Убираем распорку, которой попап подрастал под меню
+  document.body.style.minHeight = '';
 }
 
 function openKebab(anchor: HTMLElement, actions: { label: string; run: () => void }[]): void {
@@ -162,14 +164,17 @@ function openKebab(anchor: HTMLElement, actions: { label: string; run: () => voi
   // Границы берём у документа: window.innerWidth в попапе может врать
   // (зум браузера, окно раздуто позиционированным элементом)
   const vw = document.documentElement.clientWidth;
-  const vh = document.documentElement.clientHeight;
   const w = kebabMenu.offsetWidth;
-  const h = kebabMenu.offsetHeight;
   const left = Math.max(8, Math.min(rect.right - w, vw - w - 8));
-  // Снизу не влезает — разворачиваемся вверх от кнопки
-  const top = rect.bottom + 4 + h <= vh - 8 ? rect.bottom + 4 : Math.max(8, rect.top - 4 - h);
+  const top = rect.bottom + 4;
   kebabMenu.style.left = `${left}px`;
   kebabMenu.style.top = `${top}px`;
+  // Меню ниже края попапа — подращиваем сам попап распоркой: Chrome
+  // растягивает окно под документ, фиксированное меню он не считает
+  const needed = top + kebabMenu.offsetHeight + 8;
+  if (needed > document.documentElement.clientHeight) {
+    document.body.style.minHeight = `${needed}px`;
+  }
 }
 
 document.addEventListener('click', (e) => {
