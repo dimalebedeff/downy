@@ -162,6 +162,37 @@ document.addEventListener('keydown', (e) => {
 
 // ---------- Карточки медиа ----------
 
+/** Обложка настоящей картинкой (poster/og:image) — наш 192px-кадр из ffmpeg не годится. */
+function coverUrlFor(item: MediaItem): string | undefined {
+  return [item.thumb, pageThumb].find((u) => u?.startsWith('http'));
+}
+
+function downloadCover(item: MediaItem, coverUrl: string): void {
+  void chrome.runtime.sendMessage({
+    type: 'download-direct',
+    item: {
+      url: coverUrl,
+      kind: 'direct',
+      tabId: item.tabId,
+      foundAt: Date.now(),
+      pageUrl: item.pageUrl,
+      pageTitle: `${itemTitle(item)} [обложка]`,
+      contentType: 'image/jpeg',
+    },
+    streams: 'both',
+  });
+}
+
+/** Клик по превью качает обложку; при ховере — подсказка поверх картинки. */
+function makeThumbDownloadable(thumbBox: HTMLDivElement, run: () => void): void {
+  thumbBox.classList.add('thumb-dl');
+  const hint = document.createElement('span');
+  hint.className = 'thumb-hint';
+  hint.textContent = 'Скачать обложку';
+  thumbBox.append(hint);
+  thumbBox.addEventListener('click', run);
+}
+
 function renderMedia(): void {
   needsRender = false;
   liveBars.clear();
@@ -223,6 +254,8 @@ function renderMedia(): void {
       badge.textContent = duration;
       thumbBox.append(badge);
     }
+    const cover = coverUrlFor(item);
+    if (cover) makeThumbDownloadable(thumbBox, () => downloadCover(item, cover));
 
     const body = document.createElement('div');
     body.className = 'card-body';
@@ -282,6 +315,10 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
   } else {
     thumbBox.textContent = '🎬';
   }
+  // Обложку страницы достаёт yt-dlp — работает и без превью
+  makeThumbDownloadable(thumbBox, () => {
+    void chrome.runtime.sendMessage({ type: 'download-thumb-ytdlp', pageUrl: pv.url, pageTitle: pv.title });
+  });
 
   const body = document.createElement('div');
   body.className = 'card-body';
@@ -426,28 +463,9 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
         { label: 'Скачать только звук', run: () => start('audio') },
       );
     }
-    // Обложка — только настоящая картинка (poster/og:image); наш 192px-кадр
-    // из ffmpeg за обложку не выдаём
-    const coverUrl = [item.thumb, pageThumb].find((u) => u?.startsWith('http'));
+    const coverUrl = coverUrlFor(item);
     if (coverUrl) {
-      actions.push({
-        label: 'Скачать обложку',
-        run: () => {
-          void chrome.runtime.sendMessage({
-            type: 'download-direct',
-            item: {
-              url: coverUrl,
-              kind: 'direct',
-              tabId: item.tabId,
-              foundAt: Date.now(),
-              pageUrl: item.pageUrl,
-              pageTitle: `${itemTitle(item)} [обложка]`,
-              contentType: 'image/jpeg',
-            },
-            streams: 'both',
-          });
-        },
-      });
+      actions.push({ label: 'Скачать обложку', run: () => downloadCover(item, coverUrl) });
     }
     actions.push({
       label: 'Копировать ссылку',

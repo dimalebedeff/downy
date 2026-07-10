@@ -235,6 +235,24 @@ ul { list-style: none; margin: 0; padding: 0; }
 }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
 
+/* Клик по превью качает обложку; подсказка проявляется при ховере */
+.thumb-dl { cursor: pointer; }
+.thumb-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 12, 14, .55);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.thumb-dl:hover .thumb-hint { opacity: 1; }
+
 .badge {
   position: absolute;
   right: 4px;
