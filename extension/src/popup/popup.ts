@@ -39,23 +39,33 @@ let pageProbe: ProbeState | undefined;
 let lastItems: MediaItem[] = [];
 let lastJobs: JobInfo[] = [];
 
-// Живые шкалы: jobId → элементы, которые обновляем на месте без перерисовки,
-// иначе CSS-переход ширины не срабатывает и полоска дёргается скачками
-const liveBars = new Map<string, { fill: HTMLDivElement; label: HTMLElement }>();
+// Живые шкалы и подписи: jobId → элементы, которые обновляем на месте без
+// перерисовки, иначе CSS-переход ширины не срабатывает и полоска дёргается.
+// У одной загрузки их может быть два: шкала на карточке и строка в очереди
+const liveBars = new Map<string, { fill?: HTMLDivElement; label: HTMLElement }[]>();
 // Перерисовку отложили (открыт кебаб) — догоним на ближайшем поллинге
 let needsRender = false;
 
+function trackLive(jobId: string, el: { fill?: HTMLDivElement; label: HTMLElement }): void {
+  const list = liveBars.get(jobId);
+  if (list) list.push(el);
+  else liveBars.set(jobId, [el]);
+}
+
 function updateJobProgress(job: JobInfo): void {
-  const el = liveBars.get(job.jobId);
-  if (!el) return;
+  const els = liveBars.get(job.jobId);
+  if (!els) return;
   const { text, ratio } = jobProgressView(job);
-  el.label.textContent = text;
-  if (ratio != null) {
-    el.fill.classList.remove('indeterminate');
-    el.fill.style.width = `${(ratio * 100).toFixed(2)}%`;
-  } else if (!el.fill.classList.contains('indeterminate')) {
-    el.fill.style.width = '';
-    el.fill.classList.add('indeterminate');
+  for (const el of els) {
+    el.label.textContent = text;
+    if (!el.fill) continue;
+    if (ratio != null) {
+      el.fill.classList.remove('indeterminate');
+      el.fill.style.width = `${(ratio * 100).toFixed(2)}%`;
+    } else if (!el.fill.classList.contains('indeterminate')) {
+      el.fill.style.width = '';
+      el.fill.classList.add('indeterminate');
+    }
   }
 }
 
@@ -540,7 +550,7 @@ function jobLine(job: JobInfo): HTMLDivElement {
   }
 
   label.textContent = text;
-  liveBars.set(job.jobId, { fill, label });
+  trackLive(job.jobId, { fill, label });
   line.append(bar, label, pauseBtn(job), cancelBtn(job));
   return line;
 }
@@ -652,8 +662,9 @@ function onUpdateProgress(state: string, message?: string): void {
 
 let dragId: string | null = null;
 
-/** Строка очереди; порядок — сверху вниз, активная первой */
-function queueRow(job: JobInfo): HTMLLIElement {
+/** Строка очереди; порядок — сверху вниз, активная первой.
+ *  withBar=false — у загрузки есть карточка, полоска живёт там. */
+function queueRow(job: JobInfo, withBar: boolean): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'tail-job queue-row';
   li.dataset.jobId = job.jobId;
@@ -712,7 +723,7 @@ function queueRow(job: JobInfo): HTMLLIElement {
 
   li.append(row);
 
-  if (job.state !== 'queued') {
+  if (job.state !== 'queued' && withBar) {
     const bar = document.createElement('div');
     bar.className = 'bar';
     const fill = document.createElement('div');
@@ -723,7 +734,10 @@ function queueRow(job: JobInfo): HTMLLIElement {
     if (job.state === 'paused') bar.classList.add('paused');
     bar.append(fill);
     li.append(bar);
-    if (job.state !== 'paused') liveBars.set(job.jobId, { fill, label: state });
+    if (job.state !== 'paused') trackLive(job.jobId, { fill, label: state });
+  } else if (job.state !== 'queued' && job.state !== 'paused') {
+    // Без полоски цифры всё равно живые
+    trackLive(job.jobId, { label: state });
   }
 
   return li;
@@ -780,14 +794,15 @@ function finishedRow(job: JobInfo): HTMLLIElement {
 function renderJobs(matched: Set<string>): void {
   hasActiveJobs = lastJobs.some((j) => j.state === 'running' || j.state === 'starting' || j.state === 'queued');
   syncUpdateBtn();
-  // Загрузки с карточкой показывают прогресс там — внизу их не дублируем;
-  // завершённые без карточки — хвостом
-  const queue = lastJobs.filter((j) => isUnfinished(j.state) && !matched.has(j.jobId));
+  // Очередь целиком, сверху вниз в порядке скачивания — по ней видно, кто
+  // качается и кто следующий. У карточных загрузок полоска на карточке,
+  // в строке — только цифры. Завершённые без карточки — хвостом
+  const queue = lastJobs.filter((j) => isUnfinished(j.state));
   const finished = lastJobs.filter((j) => !isUnfinished(j.state) && !matched.has(j.jobId));
   jobsSection.hidden = queue.length === 0 && finished.length === 0;
   clearJobsBtn.hidden = finished.length === 0;
   jobsList.textContent = '';
-  for (const job of queue) jobsList.append(queueRow(job));
+  for (const job of queue) jobsList.append(queueRow(job, !matched.has(job.jobId)));
   for (const job of finished) jobsList.append(finishedRow(job));
 }
 

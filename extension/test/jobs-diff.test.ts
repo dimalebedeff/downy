@@ -26,6 +26,11 @@ describe('diffJobs', () => {
     expect(diffJobs([job({ progress: null, bytes: undefined })], [job()])).toBe('progress');
   });
 
+  it('изменилась только скорость — progress', () => {
+    expect(diffJobs([job()], [job({ speedBps: 5_000_000 })])).toBe('progress');
+    expect(diffJobs([job({ speedBps: 5_000_000 })], [job({ speedBps: 6_000_000 })])).toBe('progress');
+  });
+
   it('новая или пропавшая загрузка — structural', () => {
     expect(diffJobs([], [job()])).toBe('structural');
     expect(diffJobs([job()], [])).toBe('structural');

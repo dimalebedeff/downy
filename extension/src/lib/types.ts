@@ -40,6 +40,8 @@ export interface JobInfo {
   noQueue?: boolean;
   bytes?: number;
   totalBytes?: number;
+  /** Сглаженная скорость, байт/с — считает background по дельтам байтов */
+  speedBps?: number;
   message?: string;
   outFile?: string;
 }

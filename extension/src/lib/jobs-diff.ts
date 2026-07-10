@@ -22,7 +22,7 @@ export function diffJobs(prev: JobInfo[], next: JobInfo[]): JobsDiff {
     ) {
       return 'structural';
     }
-    if (a.progress !== b.progress || a.bytes !== b.bytes || a.totalBytes !== b.totalBytes) {
+    if (a.progress !== b.progress || a.bytes !== b.bytes || a.totalBytes !== b.totalBytes || a.speedBps !== b.speedBps) {
       progressChanged = true;
     }
   }

@@ -5,6 +5,7 @@ import { looksLikeMpd, mpdDuration } from './lib/mpd';
 import { buildFilename, buildYtdlpStem } from './lib/filename';
 import { isNewerVersion, REPO } from './lib/update';
 import { applyReorder, isUnfinished, nextToStart, normalizeOrder } from './lib/queue';
+import { nextSpeed, type SpeedTrack } from './lib/speed';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
 import type {
   CoAppEvent,
@@ -39,6 +40,8 @@ const inflightHls = new Set<string>();
 
 /** Порядок незавершённых загрузок; голова — активная */
 let queueOrder: string[] = [];
+/** Замеры скорости по джобам; живёт в памяти SW — после рестарта пересчитается */
+const speedTracks = new Map<string, SpeedTrack>();
 /** Исходные запросы к CoApp — для отложенного старта и резюма после паузы */
 const jobRequests = new Map<string, CoAppRequest>();
 
@@ -455,6 +458,14 @@ function getCoAppPort(): chrome.runtime.Port {
     job.message = msg.message;
     if (msg.bytes != null) job.bytes = msg.bytes;
     if (msg.totalBytes != null) job.totalBytes = msg.totalBytes;
+    if (msg.state === 'running' && msg.bytes != null) {
+      const track = nextSpeed(speedTracks.get(msg.jobId), msg.bytes, Date.now());
+      speedTracks.set(msg.jobId, track);
+      job.speedBps = track.bps;
+    } else if (msg.state !== 'running') {
+      speedTracks.delete(msg.jobId);
+      job.speedBps = undefined;
+    }
     if (msg.outFile) job.outFile = msg.outFile;
     if (msg.state === 'done' || msg.state === 'error' || msg.state === 'canceled') {
       jobRequests.delete(msg.jobId);

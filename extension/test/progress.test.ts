@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtSize, jobProgressView } from '../src/lib/progress';
+import { fmtEta, fmtSize, fmtSpeed, jobProgressView } from '../src/lib/progress';
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
@@ -62,5 +62,53 @@ describe('jobProgressView', () => {
     const v = jobProgressView({ progress: 0.5, bytes: 10 * MB, totalBytes: 40 * MB });
     expect(v.text).toBe('10.0 МБ / 40.0 МБ');
     expect(v.ratio).toBe(0.5);
+  });
+
+  it('со скоростью — компактно: процент, скорость, остаток', () => {
+    const v = jobProgressView({ progress: null, bytes: 120 * MB, totalBytes: 480 * MB, speedBps: 12.4 * MB });
+    expect(v.text).toBe(`25% · 12.4 МБ/с · ост. ${fmtEta((360 * MB) / (12.4 * MB))}`);
+    expect(v.ratio).toBeCloseTo(0.25, 3);
+  });
+
+  it('скорость без общего размера — процент и скорость, остаток по оценке', () => {
+    const v = jobProgressView({ progress: 0.25, bytes: 45 * MB, speedBps: 3 * MB });
+    expect(v.text).toBe(`25% · 3.0 МБ/с · ост. ${fmtEta((135 * MB) / (3 * MB))}`);
+  });
+
+  it('скорость есть, а меры прогресса нет — байты и скорость без остатка', () => {
+    const v = jobProgressView({ progress: null, bytes: 7 * MB, speedBps: 2 * MB });
+    expect(v.text).toBe('7.0 МБ · 2.0 МБ/с');
+    expect(v.ratio).toBeNull();
+  });
+});
+
+describe('fmtSpeed', () => {
+  it('нет данных или мелочь — пусто', () => {
+    expect(fmtSpeed(undefined)).toBe('');
+    expect(fmtSpeed(500)).toBe('');
+  });
+
+  it('человеческие единицы', () => {
+    expect(fmtSpeed(12.4 * MB)).toBe('12.4 МБ/с');
+    expect(fmtSpeed(300 * 1024)).toBe('300 КБ/с');
+  });
+});
+
+describe('fmtEta', () => {
+  it('минуты и секунды', () => {
+    expect(fmtEta(80)).toBe('1:20');
+    expect(fmtEta(5)).toBe('0:05');
+  });
+
+  it('часы', () => {
+    expect(fmtEta(3900)).toBe('1:05:00');
+  });
+
+  it('мусор — пустая строка', () => {
+    expect(fmtEta(undefined)).toBe('');
+    expect(fmtEta(0)).toBe('');
+    expect(fmtEta(-5)).toBe('');
+    expect(fmtEta(Infinity)).toBe('');
+    expect(fmtEta(1e9)).toBe('');
   });
 });
