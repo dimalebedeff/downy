@@ -1,6 +1,6 @@
 import type { JobInfo, MediaItem, ProbeState } from '../lib/types';
 import type { CutRange, StreamSelection } from '../../../shared/protocol';
-import { makeCut, maskTimecode } from '../lib/cut';
+import { isYoutubeUrl, makeCut, maskTimecode } from '../lib/cut';
 import { fmtSize, jobProgressView } from '../lib/progress';
 import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
@@ -148,17 +148,25 @@ function closeKebab(): void {
   document.body.style.minHeight = '';
 }
 
-function openKebab(anchor: HTMLElement, actions: { label: string; run: () => void }[]): void {
+function openKebab(
+  anchor: HTMLElement,
+  actions: { label: string; run: () => void; disabled?: boolean; hint?: string }[],
+): void {
   // Распорка прошлого меню не должна влиять на замеры нового
   document.body.style.minHeight = '';
   kebabMenu.textContent = '';
   for (const a of actions) {
     const b = document.createElement('button');
     b.textContent = a.label;
-    b.addEventListener('click', () => {
-      closeKebab();
-      a.run();
-    });
+    if (a.disabled) {
+      b.disabled = true;
+      if (a.hint) b.title = a.hint;
+    } else {
+      b.addEventListener('click', () => {
+        closeKebab();
+        a.run();
+      });
+    }
     kebabMenu.append(b);
   }
   kebabMenu.hidden = false;
@@ -253,8 +261,8 @@ function toggleCutRow(body: HTMLElement, run: (cut: CutRange) => void): void {
     });
     return i;
   };
-  const from = mkInput('0:00', 'Начало отрезка: только цифры, двоеточия подставятся сами');
-  const to = mkInput('до конца', 'Конец отрезка: только цифры, двоеточия подставятся сами');
+  const from = mkInput('00:00', 'Начало отрезка: только цифры, формат сам растёт до ЧЧ:ММ:СС. Пусто — с начала');
+  const to = mkInput('00:00', 'Конец отрезка: только цифры, формат сам растёт до ЧЧ:ММ:СС. Пусто — до конца');
   const dash = document.createElement('span');
   dash.className = 'cut-dash';
   dash.textContent = '–';
@@ -311,11 +319,11 @@ function renderMedia(): void {
   ytdlpRow.hidden = showPageCards;
   if (!emptyEl.hidden) {
     if (ytdlpRow.parentElement !== emptyEl) emptyEl.append(ytdlpRow);
-    ytdlpBtn.textContent = 'Надавить на сайт';
+    ytdlpBtn.textContent = 'Контент не нашелся?';
     ytdlpBtn.title = 'Скачать страницу через yt-dlp';
   } else {
     if (ytdlpRow.parentElement !== footerEl) footerEl.prepend(ytdlpRow);
-    ytdlpBtn.textContent = 'Надавить на сайт';
+    ytdlpBtn.textContent = 'Контент не нашелся?';
     ytdlpBtn.title = 'Скачать страницу через yt-dlp';
   }
 
@@ -366,9 +374,10 @@ function renderMedia(): void {
     const title = document.createElement('div');
     title.className = 'card-title';
     title.textContent = itemTitle(item);
-    // Инженерное — в тултип: URL и формат потока
+    // В тултипе — полное название (в карточке оно обрезано) плюс инженерное:
+    // URL и формат потока
     const kindLabel = item.kind === 'hls' ? 'HLS' : item.kind === 'dash' ? 'DASH' : item.contentType ?? '';
-    title.title = [item.url, kindLabel].filter(Boolean).join('\n');
+    title.title = [itemTitle(item), item.url, kindLabel].filter(Boolean).join('\n');
     body.append(title);
 
     const metaParts: string[] = [];
@@ -430,8 +439,10 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
 
   const title = document.createElement('div');
   title.className = 'card-title';
-  title.textContent = probeReady?.title?.trim() || pv.title?.trim() || pv.url;
-  title.title = pv.url;
+  const fullTitle = probeReady?.title?.trim() || pv.title?.trim() || pv.url;
+  title.textContent = fullTitle;
+  // Полное название — в тултип: в карточке оно обрезано двумя строками
+  title.title = fullTitle === pv.url ? pv.url : `${fullTitle}\n${pv.url}`;
   body.append(title);
 
   if (job && isUnfinished(job.state)) {
@@ -497,7 +508,13 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
       openKebab(kebab, [
         { label: 'Скачать только видео', run: () => void start('video') },
         { label: 'Скачать только звук', run: () => void start('audio') },
-        { label: 'Скачать отрезок…', run: () => toggleCutRow(body, (cut) => void start('both', cut)) },
+        {
+          label: 'Скачать отрезок…',
+          run: () => toggleCutRow(body, (cut) => void start('both', cut)),
+          // Ютуб отрезки не отдаёт — качать весь ролик ради куска не предлагаем
+          disabled: isYoutubeUrl(pv.url),
+          hint: 'Ютуб не отдаёт отрезки — пришлось бы качать весь ролик',
+        },
         {
           label: 'Скачать обложку',
           run: () => {

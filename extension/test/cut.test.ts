@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutLabel, makeCut, maskTimecode, parseTimecode, withCutSuffix } from '../src/lib/cut';
+import { cutLabel, isYoutubeUrl, makeCut, maskTimecode, parseTimecode, withCutSuffix } from '../src/lib/cut';
 
 describe('parseTimecode', () => {
   it('голые секунды', () => {
@@ -31,25 +31,29 @@ describe('parseTimecode', () => {
 });
 
 describe('maskTimecode', () => {
-  it('двоеточия расставляются справа налево парами', () => {
-    expect(maskTimecode('1')).toBe('1');
-    expect(maskTimecode('13')).toBe('13');
-    expect(maskTimecode('130')).toBe('1:30');
+  it('цифры заезжают справа в шаблон MM:SS', () => {
+    expect(maskTimecode('1')).toBe('00:01');
+    expect(maskTimecode('13')).toBe('00:13');
+    expect(maskTimecode('130')).toBe('01:30');
     expect(maskTimecode('1305')).toBe('13:05');
-    expect(maskTimecode('13052')).toBe('1:30:52');
+  });
+
+  it('от пятой цифры шаблон растёт до HH:MM:SS, седьмая игнорируется', () => {
+    expect(maskTimecode('13:059')).toBe('01:30:59');
     expect(maskTimecode('130520')).toBe('13:05:20');
+    expect(maskTimecode('13:05:209')).toBe('13:05:20');
   });
 
-  it('нецифры выкидываются, хвост длиннее шести цифр отрезается', () => {
-    expect(maskTimecode('1:30')).toBe('1:30');
-    expect(maskTimecode('a1b3c0')).toBe('1:30');
-    expect(maskTimecode('1234567')).toBe('12:34:56');
+  it('нецифры выкидываются, нули и пустота — пустое поле', () => {
+    expect(maskTimecode('a1b3c0')).toBe('01:30');
     expect(maskTimecode('')).toBe('');
+    expect(maskTimecode('0')).toBe('');
+    expect(maskTimecode('00:00')).toBe('');
   });
 
-  it('удаление символа пересобирает группы', () => {
-    // Было «1:30», стёрли последний символ → «1:3» → цифры «13»
-    expect(maskTimecode('1:3')).toBe('13');
+  it('backspace уменьшает число справа', () => {
+    // Было «00:13», стёрли последний символ → «00:1» → «00:01»
+    expect(maskTimecode('00:1')).toBe('00:01');
   });
 });
 
@@ -84,6 +88,21 @@ describe('cutLabel', () => {
     expect(cutLabel({ fromSec: 3920, toSec: 4000 })).toBe('1.05.20-1.06.40');
     expect(cutLabel({ toSec: 60 })).toBe('00.00-01.00');
     expect(cutLabel({ fromSec: 90 })).toBe('01.30-конец');
+  });
+});
+
+describe('isYoutubeUrl', () => {
+  it('ютуб во всех обличиях', () => {
+    expect(isYoutubeUrl('https://www.youtube.com/watch?v=x')).toBe(true);
+    expect(isYoutubeUrl('https://youtu.be/x')).toBe(true);
+    expect(isYoutubeUrl('https://music.youtube.com/watch?v=x')).toBe(true);
+  });
+
+  it('не ютуб', () => {
+    expect(isYoutubeUrl('https://x.com/user/status/1')).toBe(false);
+    expect(isYoutubeUrl('https://notyoutube.com/')).toBe(false);
+    expect(isYoutubeUrl(undefined)).toBe(false);
+    expect(isYoutubeUrl('мусор')).toBe(false);
   });
 });
 

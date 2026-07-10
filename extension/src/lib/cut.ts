@@ -14,15 +14,19 @@ export function parseTimecode(raw: string): number | null {
 }
 
 /**
- * Маска поля времени: оставляет цифры и расставляет двоеточия справа
- * налево парами — «130» → «1:30», «13052» → «1:30:52». Ввод «как есть»,
- * курсор всегда в конце — поле короткое, это не мешает.
+ * Маска поля времени: цифры заезжают справа в шаблон MM:SS — «1» → «00:01»,
+ * «130» → «01:30»; от пятой цифры шаблон растёт до HH:MM:SS. Сплошные нули
+ * равны пустому полю (пусто = «с начала» / «до конца»).
  */
 export function maskTimecode(raw: string): string {
-  const digits = raw.replace(/\D/g, '').slice(0, 6);
-  const groups: string[] = [];
-  for (let i = digits.length; i > 0; i -= 2) groups.unshift(digits.slice(Math.max(0, i - 2), i));
-  return groups.join(':');
+  const digits = raw.replace(/\D/g, '').replace(/^0+/, '').slice(0, 6);
+  if (!digits) return '';
+  if (digits.length <= 4) {
+    const p = digits.padStart(4, '0');
+    return `${p.slice(0, 2)}:${p.slice(2)}`;
+  }
+  const p = digits.padStart(6, '0');
+  return `${p.slice(0, 2)}:${p.slice(2, 4)}:${p.slice(4)}`;
 }
 
 /**
@@ -51,6 +55,18 @@ export function cutLabel(cut: CutRange): string {
   const from = fmt(cut.fromSec ?? 0);
   const to = cut.toSec != null ? fmt(cut.toSec) : 'конец';
   return `${from}-${to}`;
+}
+
+/** Ютуб отдаёт SABR-потоки: yt-dlp --download-sections там виснет, а качать
+ *  весь ролик ради отрезка — смысла нет. Пункт меню на ютубе гасим. */
+export function isYoutubeUrl(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, '');
+    return h === 'youtu.be' || h === 'youtube.com' || h.endsWith('.youtube.com');
+  } catch {
+    return false;
+  }
 }
 
 /** Вписывает метку отрезка в имя файла перед расширением */

@@ -566,7 +566,8 @@ function startYtdlp(req: YtdlpJobRequest): void {
   }
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
   args.push(...ytdlpFormatArgs(streams, req.maxHeight));
-  // Отрезок: yt-dlp качает только нужную секцию (режет ffmpeg по ключевым кадрам)
+  // Отрезок: yt-dlp качает только нужную секцию (режет ffmpeg по ключевым
+  // кадрам). Ютубу не предлагаем — его SABR-потоки ffmpeg не читает
   if (req.cut) args.push('--download-sections', `*${req.cut.fromSec ?? 0}-${req.cut.toSec ?? 'inf'}`);
   args.push(req.pageUrl);
 
