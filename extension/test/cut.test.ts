@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutLabel, makeCut, parseTimecode, withCutSuffix } from '../src/lib/cut';
+import { cutLabel, makeCut, maskTimecode, parseTimecode, withCutSuffix } from '../src/lib/cut';
 
 describe('parseTimecode', () => {
   it('голые секунды', () => {
@@ -27,6 +27,29 @@ describe('parseTimecode', () => {
     expect(parseTimecode('1:99')).toBeNull();
     expect(parseTimecode('1:2:3:4')).toBeNull();
     expect(parseTimecode('-5')).toBeNull();
+  });
+});
+
+describe('maskTimecode', () => {
+  it('двоеточия расставляются справа налево парами', () => {
+    expect(maskTimecode('1')).toBe('1');
+    expect(maskTimecode('13')).toBe('13');
+    expect(maskTimecode('130')).toBe('1:30');
+    expect(maskTimecode('1305')).toBe('13:05');
+    expect(maskTimecode('13052')).toBe('1:30:52');
+    expect(maskTimecode('130520')).toBe('13:05:20');
+  });
+
+  it('нецифры выкидываются, хвост длиннее шести цифр отрезается', () => {
+    expect(maskTimecode('1:30')).toBe('1:30');
+    expect(maskTimecode('a1b3c0')).toBe('1:30');
+    expect(maskTimecode('1234567')).toBe('12:34:56');
+    expect(maskTimecode('')).toBe('');
+  });
+
+  it('удаление символа пересобирает группы', () => {
+    // Было «1:30», стёрли последний символ → «1:3» → цифры «13»
+    expect(maskTimecode('1:3')).toBe('13');
   });
 });
 

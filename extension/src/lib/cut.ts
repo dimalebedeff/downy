@@ -14,6 +14,18 @@ export function parseTimecode(raw: string): number | null {
 }
 
 /**
+ * Маска поля времени: оставляет цифры и расставляет двоеточия справа
+ * налево парами — «130» → «1:30», «13052» → «1:30:52». Ввод «как есть»,
+ * курсор всегда в конце — поле короткое, это не мешает.
+ */
+export function maskTimecode(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 6);
+  const groups: string[] = [];
+  for (let i = digits.length; i > 0; i -= 2) groups.unshift(digits.slice(Math.max(0, i - 2), i));
+  return groups.join(':');
+}
+
+/**
  * Отрезок из сырых полей ввода. null — просить нечего: оба поля пустые,
  * мусор в заполненном поле или конец не позже начала.
  */

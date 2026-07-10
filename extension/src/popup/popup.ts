@@ -1,6 +1,6 @@
 import type { JobInfo, MediaItem, ProbeState } from '../lib/types';
 import type { CutRange, StreamSelection } from '../../../shared/protocol';
-import { makeCut } from '../lib/cut';
+import { makeCut, maskTimecode } from '../lib/cut';
 import { fmtSize, jobProgressView } from '../lib/progress';
 import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
@@ -245,10 +245,16 @@ function toggleCutRow(body: HTMLElement, run: (cut: CutRange) => void): void {
     const i = document.createElement('input');
     i.placeholder = ph;
     i.title = title;
+    // Поле времени: вводятся только цифры, двоеточия подставляются сами
+    i.inputMode = 'numeric';
+    i.addEventListener('input', () => {
+      const masked = maskTimecode(i.value);
+      if (i.value !== masked) i.value = masked;
+    });
     return i;
   };
-  const from = mkInput('0:00', 'Начало отрезка: секунды, мм:сс или чч:мм:сс');
-  const to = mkInput('до конца', 'Конец отрезка: секунды, мм:сс или чч:мм:сс');
+  const from = mkInput('0:00', 'Начало отрезка: только цифры, двоеточия подставятся сами');
+  const to = mkInput('до конца', 'Конец отрезка: только цифры, двоеточия подставятся сами');
   const dash = document.createElement('span');
   dash.className = 'cut-dash';
   dash.textContent = '–';
