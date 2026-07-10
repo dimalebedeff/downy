@@ -377,13 +377,21 @@ select {
   overflow: hidden;
   accent-color: var(--accent);
 }
-/* Селект качества — по содержимому, без пустыря между текстом и стрелкой;
-   длинный текст тает в прозрачность у правого края (маска возвращается
-   к непрозрачной в зоне стрелки, чтобы та не тонула) */
-.card-actions select {
-  text-overflow: clip;
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent calc(100% - 18px), #000 calc(100% - 18px));
-  mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent calc(100% - 18px), #000 calc(100% - 18px));
+/* Селект качества — по содержимому, без пустыря между текстом и стрелкой.
+   Длинный текст тает под градиентной шторкой перед стрелкой; шторка лежит
+   поверх текста и не трогает рамку (маска на самом селекте резала обводку) */
+.card-actions select { text-overflow: clip; }
+.select-wrap { position: relative; display: flex; min-width: 0; }
+.select-wrap select { width: 100%; }
+.select-wrap::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  right: 18px;
+  width: 18px;
+  background: linear-gradient(to right, transparent, var(--card));
+  pointer-events: none;
 }
 .card-actions .kebab { margin-left: auto; }
 select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0; }

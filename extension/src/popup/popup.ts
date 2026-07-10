@@ -149,6 +149,8 @@ function closeKebab(): void {
 }
 
 function openKebab(anchor: HTMLElement, actions: { label: string; run: () => void }[]): void {
+  // Распорка прошлого меню не должна влиять на замеры нового
+  document.body.style.minHeight = '';
   kebabMenu.textContent = '';
   for (const a of actions) {
     const b = document.createElement('button');
@@ -207,6 +209,14 @@ function downloadCover(item: MediaItem, coverUrl: string): void {
     },
     streams: 'both',
   });
+}
+
+/** Обёртка селекта — рисует шторку затухания текста, не трогая рамку. */
+function wrapSelect(select: HTMLSelectElement): HTMLSpanElement {
+  const wrap = document.createElement('span');
+  wrap.className = 'select-wrap';
+  wrap.append(select);
+  return wrap;
 }
 
 /** Крестик в правом верхнем углу карточки: убрать находку из списка. */
@@ -492,7 +502,7 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
       ]);
     });
 
-    row.append(btn, select, kebab);
+    row.append(btn, wrapSelect(select), kebab);
     body.append(row);
   }
 
@@ -573,7 +583,7 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
   });
 
   row.append(btn);
-  if (select) row.append(select);
+  if (select) row.append(wrapSelect(select));
   row.append(kebab);
   return row;
 }
