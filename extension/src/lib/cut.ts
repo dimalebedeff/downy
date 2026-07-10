@@ -14,19 +14,27 @@ export function parseTimecode(raw: string): number | null {
 }
 
 /**
- * Маска поля времени: цифры заезжают справа в шаблон MM:SS — «1» → «00:01»,
- * «130» → «01:30»; от пятой цифры шаблон растёт до HH:MM:SS. Сплошные нули
- * равны пустому полю (пусто = «с начала» / «до конца»).
+ * Маска поля времени: цифры набираются слева, с минут — «1» → «1»,
+ * «123» → «12:3», «1234» → «12:34»; с пятой цифры набранное съезжает
+ * влево и появляются часы: «12345» → «1:23:45». Лишние цифры и мусор
+ * отбрасываются, пустое поле = «с начала» / «до конца».
  */
 export function maskTimecode(raw: string): string {
-  const digits = raw.replace(/\D/g, '').replace(/^0+/, '').slice(0, 6);
+  const digits = raw.replace(/\D/g, '').slice(0, 6);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+  const h = digits.length - 4;
+  return `${digits.slice(0, h)}:${digits.slice(h, h + 2)}:${digits.slice(h + 2)}`;
+}
+
+/**
+ * Дозаполняет недобранный таймкод нулями по позициям набора: «13» → «13:00»,
+ * «13:5» → «13:50». Набор идёт слева, поэтому пустые позиции — справа.
+ */
+export function finishTimecode(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 6);
   if (!digits) return '';
-  if (digits.length <= 4) {
-    const p = digits.padStart(4, '0');
-    return `${p.slice(0, 2)}:${p.slice(2)}`;
-  }
-  const p = digits.padStart(6, '0');
-  return `${p.slice(0, 2)}:${p.slice(2, 4)}:${p.slice(4)}`;
+  return maskTimecode(digits.length < 4 ? digits.padEnd(4, '0') : digits);
 }
 
 /**

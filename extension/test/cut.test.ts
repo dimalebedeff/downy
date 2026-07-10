@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutLabel, isYoutubeUrl, makeCut, maskTimecode, parseTimecode, withCutSuffix } from '../src/lib/cut';
+import { cutLabel, finishTimecode, isYoutubeUrl, makeCut, maskTimecode, parseTimecode, withCutSuffix } from '../src/lib/cut';
 
 describe('parseTimecode', () => {
   it('голые секунды', () => {
@@ -31,29 +31,44 @@ describe('parseTimecode', () => {
 });
 
 describe('maskTimecode', () => {
-  it('цифры заезжают справа в шаблон MM:SS', () => {
-    expect(maskTimecode('1')).toBe('00:01');
-    expect(maskTimecode('13')).toBe('00:13');
-    expect(maskTimecode('130')).toBe('01:30');
-    expect(maskTimecode('1305')).toBe('13:05');
+  it('цифры набираются слева, с минут', () => {
+    expect(maskTimecode('1')).toBe('1');
+    expect(maskTimecode('13')).toBe('13');
+    expect(maskTimecode('13:0')).toBe('13:0');
+    expect(maskTimecode('13:05')).toBe('13:05');
   });
 
-  it('от пятой цифры шаблон растёт до HH:MM:SS, седьмая игнорируется', () => {
-    expect(maskTimecode('13:059')).toBe('01:30:59');
-    expect(maskTimecode('130520')).toBe('13:05:20');
-    expect(maskTimecode('13:05:209')).toBe('13:05:20');
+  it('с пятой цифры набранное съезжает влево, появляются часы', () => {
+    expect(maskTimecode('13:052')).toBe('1:30:52');
+    expect(maskTimecode('1:30:526')).toBe('13:05:26');
+    expect(maskTimecode('13:05:269')).toBe('13:05:26');
   });
 
-  it('нецифры выкидываются, нули и пустота — пустое поле', () => {
-    expect(maskTimecode('a1b3c0')).toBe('01:30');
+  it('нецифры выкидываются, ведущие нули остаются на месте', () => {
+    expect(maskTimecode('a1b3c0')).toBe('13:0');
     expect(maskTimecode('')).toBe('');
-    expect(maskTimecode('0')).toBe('');
-    expect(maskTimecode('00:00')).toBe('');
+    expect(maskTimecode('0130')).toBe('01:30');
   });
 
-  it('backspace уменьшает число справа', () => {
-    // Было «00:13», стёрли последний символ → «00:1» → «00:01»
-    expect(maskTimecode('00:1')).toBe('00:01');
+  it('backspace стирает цифру справа, набранное съезжает обратно', () => {
+    // Было «13:05», стёрли последний символ → «13:0»
+    expect(maskTimecode('13:0')).toBe('13:0');
+    // Было «1:30:52», стёрли последний символ → «1:30:5» → часы уходят
+    expect(maskTimecode('1:30:5')).toBe('13:05');
+  });
+});
+
+describe('finishTimecode', () => {
+  it('добивает недобранное поле нулями по позициям набора', () => {
+    expect(finishTimecode('1')).toBe('10:00');
+    expect(finishTimecode('13')).toBe('13:00');
+    expect(finishTimecode('13:5')).toBe('13:50');
+  });
+
+  it('полное поле и пустоту не трогает', () => {
+    expect(finishTimecode('13:05')).toBe('13:05');
+    expect(finishTimecode('1:30:52')).toBe('1:30:52');
+    expect(finishTimecode('')).toBe('');
   });
 });
 

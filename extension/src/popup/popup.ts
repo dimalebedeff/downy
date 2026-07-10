@@ -1,6 +1,6 @@
 import type { JobInfo, MediaItem, ProbeState } from '../lib/types';
 import type { CutRange, StreamSelection } from '../../../shared/protocol';
-import { isYoutubeUrl, makeCut, maskTimecode } from '../lib/cut';
+import { finishTimecode, isYoutubeUrl, makeCut, maskTimecode } from '../lib/cut';
 import { fmtSize, jobProgressView } from '../lib/progress';
 import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
@@ -259,10 +259,15 @@ function toggleCutRow(body: HTMLElement, run: (cut: CutRange) => void): void {
       const masked = maskTimecode(i.value);
       if (i.value !== masked) i.value = masked;
     });
+    // Недобранное поле трактуем позиционно («13» — минуты), добиваем нулями
+    i.addEventListener('blur', () => {
+      const done = finishTimecode(i.value);
+      if (i.value !== done) i.value = done;
+    });
     return i;
   };
-  const from = mkInput('00:00', 'Начало отрезка: только цифры, формат сам растёт до ЧЧ:ММ:СС. Пусто — с начала');
-  const to = mkInput('00:00', 'Конец отрезка: только цифры, формат сам растёт до ЧЧ:ММ:СС. Пусто — до конца');
+  const from = mkInput('00:00', 'Начало отрезка: только цифры, набор с минут; с пятой цифры появляются часы. Пусто — с начала');
+  const to = mkInput('00:00', 'Конец отрезка: только цифры, набор с минут; с пятой цифры появляются часы. Пусто — до конца');
   const dash = document.createElement('span');
   dash.className = 'cut-dash';
   dash.textContent = '–';
@@ -271,7 +276,8 @@ function toggleCutRow(body: HTMLElement, run: (cut: CutRange) => void): void {
   go.textContent = '✂';
   go.title = 'Скачать отрезок';
   const submit = (): void => {
-    const cut = makeCut(from.value, to.value);
+    // Enter может прилететь до blur — добиваем недобранные поля сами
+    const cut = makeCut(finishTimecode(from.value), finishTimecode(to.value));
     if (!cut) {
       row.classList.add('cut-bad');
       setTimeout(() => row.classList.remove('cut-bad'), 800);
