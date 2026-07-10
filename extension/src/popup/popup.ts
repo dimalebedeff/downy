@@ -142,6 +142,11 @@ function findJob(group: MediaGroup): JobInfo | undefined {
 
 // ---------- Кебаб-меню ----------
 
+/** Открыты поля «от – до»: перерисовка списка снесла бы их вместе с вводом */
+function cutRowOpen(): boolean {
+  return mediaList.querySelector('.cut-row') != null;
+}
+
 function closeKebab(): void {
   kebabMenu.hidden = true;
   // Убираем распорку, которой попап подрастал под меню
@@ -976,7 +981,7 @@ async function init(): Promise<void> {
       if (kind === 'progress') {
         for (const j of jobs) updateJobProgress(j);
       } else if (kind === 'structural') {
-        if (kebabMenu.hidden && !dragId) renderMedia();
+        if (kebabMenu.hidden && !dragId && !cutRowOpen()) renderMedia();
         else needsRender = true;
       }
     }
@@ -985,9 +990,10 @@ async function init(): Promise<void> {
 
   void initUpdater();
 
-  // Пока попап открыт, список может пополняться; открытое меню и драг не дёргаем
+  // Пока попап открыт, список может пополняться; открытое меню, драг и
+  // набор отрезка не дёргаем — перерисовка снесла бы их
   const mediaPoll = setInterval(() => {
-    if (kebabMenu.hidden && !dragId) void refresh();
+    if (kebabMenu.hidden && !dragId && !cutRowOpen()) void refresh();
   }, 2000);
   window.addEventListener('unload', () => clearInterval(mediaPoll));
 
