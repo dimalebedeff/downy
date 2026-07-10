@@ -181,7 +181,27 @@ h2 {
   cursor: pointer;
   user-select: none;
 }
-.ask-dir input { accent-color: var(--accent); margin: 0; }
+/* Кастомный чекбокс: нативный не скруглить */
+.ask-dir input {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  display: grid;
+  place-content: center;
+  cursor: pointer;
+}
+.ask-dir input:checked { background: var(--accent); border-color: var(--accent); }
+.ask-dir input:checked::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  background: var(--accent-ink);
+  clip-path: polygon(13% 47%, 34% 68%, 87% 12%, 100% 25%, 34% 93%, 0 60%);
+}
 
 /* ---------- Список медиа ---------- */
 
@@ -317,7 +337,15 @@ select {
   overflow: hidden;
   accent-color: var(--accent);
 }
-.card-actions select { flex: 1; }
+/* Селект качества — по содержимому, без пустыря между текстом и стрелкой;
+   длинный текст тает в прозрачность у правого края (маска возвращается
+   к непрозрачной в зоне стрелки, чтобы та не тонула) */
+.card-actions select {
+  text-overflow: clip;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent calc(100% - 18px), #000 calc(100% - 18px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent calc(100% - 18px), #000 calc(100% - 18px));
+}
+.card-actions .kebab { margin-left: auto; }
 select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 
 /* ---------- Прогресс в карточке: свечение = жизнь ---------- */
@@ -483,7 +511,7 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 
 /* ---------- Подвал ---------- */
 
-footer { padding: 8px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+footer { padding: 2px 14px 8px; display: flex; flex-direction: column; gap: 8px; }
 
 .ytdlp-row { display: flex; gap: 6px; align-items: center; }
 footer #ytdlp-page {
