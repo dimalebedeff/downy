@@ -377,12 +377,14 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
     const row = document.createElement('div');
     row.className = 'card-actions';
 
-    // Выбор качества из разведки; пока она едет — «Лучшее» работает сразу
+    // Выбор качества из разведки; пока она едет — «Лучшее» работает сразу.
+    // Разведка доехала — сразу подставляем конкретное лучшее качество с весом
     const select = document.createElement('select');
     select.title = 'Качество';
-    select.append(new Option('Лучшее', ''));
+    const opts = probeReady ? qualityOptions(probeReady.formats) : [];
+    if (opts.length === 0) select.append(new Option('Лучшее', ''));
     if (probeReady) {
-      for (const q of qualityOptions(probeReady.formats)) {
+      for (const q of opts) {
         const opt = new Option(q.label, String(q.maxHeight));
         // В имя файла идёт «1080p60», без веса
         opt.dataset.q = q.label.split(' · ')[0];
