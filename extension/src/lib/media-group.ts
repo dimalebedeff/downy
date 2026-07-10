@@ -47,18 +47,24 @@ export function sniffMuted(pageUrl?: string): boolean {
   }
 }
 
+/**
+ * URL без хэша. Плееры пишут в hash позицию и серию (#t:110-s:7-e:2) и меняют
+ * его на лету; в HTTP-запрос фрагмент не уходит, для загрузки он пустое место.
+ */
+export function stripHash(url: string): string {
+  try {
+    const u = new URL(url);
+    u.hash = '';
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 /** Один ли это адрес страницы (hash не считается: #comment — та же страница). */
 export function samePage(a?: string, b?: string): boolean {
   if (!a || !b) return false;
-  try {
-    const ua = new URL(a);
-    const ub = new URL(b);
-    ua.hash = '';
-    ub.hash = '';
-    return ua.toString() === ub.toString();
-  } catch {
-    return a === b;
-  }
+  return stripHash(a) === stripHash(b);
 }
 
 /**

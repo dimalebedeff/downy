@@ -1,5 +1,5 @@
 import { classifyMedia, isProbablyVideo } from './lib/media-detect';
-import { canonicalMediaUrl, sniffMuted } from './lib/media-group';
+import { canonicalMediaUrl, sniffMuted, stripHash } from './lib/media-group';
 import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDuration } from './lib/m3u8';
 import { looksLikeMpd, mpdDuration } from './lib/mpd';
 import { buildFilename, buildYtdlpStem } from './lib/filename';
@@ -130,12 +130,24 @@ const restored: Promise<void> = (async () => {
   }
   if (data.tabPageVideos) {
     for (const [tabId, vids] of Object.entries(data.tabPageVideos as Record<string, Record<string, PageVideo>>)) {
-      tabPageVideos.set(Number(tabId), new Map(Object.entries(vids)));
+      // Старые записи ключевались URL с хэшем — схлопываем дубли одного видео
+      const m = new Map<string, PageVideo>();
+      for (const v of Object.values(vids)) {
+        const key = stripHash(v.url);
+        const existing = m.get(key);
+        if (existing) {
+          existing.thumb ??= v.thumb;
+          existing.title ??= v.title;
+        } else {
+          m.set(key, { ...v, url: key });
+        }
+      }
+      tabPageVideos.set(Number(tabId), m);
     }
   }
   if (data.tabRemoved) {
     for (const [tabId, urls] of Object.entries(data.tabRemoved as Record<string, string[]>)) {
-      tabRemoved.set(Number(tabId), new Set(urls));
+      tabRemoved.set(Number(tabId), new Set(urls.map(stripHash)));
     }
   }
   if (data.tabMedia) {
@@ -826,8 +838,10 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         const mse = msg.mseVideo as { url?: string; thumb?: string } | undefined;
         const pageUrl = msg.pageUrl as string | undefined;
         if (mse && pageUrl) {
-          // В ленте (x.com/home) качаем не страницу, а конкретный пост
-          const videoUrl = mse.url ?? pageUrl;
+          // В ленте (x.com/home) качаем не страницу, а конкретный пост.
+          // Хэш срезаем: плееры пишут туда позицию/серию и меняют на лету —
+          // без среза одно видео плодит карточку на каждый чих хэша
+          const videoUrl = mse.url ?? stripHash(pageUrl);
           if (!tabRemoved.get(tabId)?.has(videoUrl)) {
             const vids = tabPageVideos.get(tabId) ?? new Map<string, PageVideo>();
             const existing = vids.get(videoUrl);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FRESH_FIND_MS, canonicalMediaUrl, filterPageItems, groupMediaItems, samePage, sniffMuted } from '../src/lib/media-group';
+import { FRESH_FIND_MS, canonicalMediaUrl, filterPageItems, groupMediaItems, samePage, sniffMuted, stripHash } from '../src/lib/media-group';
 import type { MediaItem } from '../src/lib/types';
 
 const MB = 1024 * 1024;
@@ -83,6 +83,17 @@ describe('groupMediaItems', () => {
     ];
     const groups = groupMediaItems(items);
     expect(groups[0].primary.url).toContain('early');
+  });
+});
+
+describe('stripHash', () => {
+  it('срезает хэш плеера, query не трогает', () => {
+    expect(stripHash('https://rezka.si/series/x.html#t:110-s:7-e:2')).toBe('https://rezka.si/series/x.html');
+    expect(stripHash('https://a.io/watch?v=1#t=10')).toBe('https://a.io/watch?v=1');
+  });
+
+  it('мусорный URL возвращает как есть', () => {
+    expect(stripHash('не-url')).toBe('не-url');
   });
 });
 
