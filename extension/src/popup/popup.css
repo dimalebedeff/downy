@@ -392,6 +392,11 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 
 .job-line { display: flex; align-items: center; gap: 8px; margin-top: auto; }
 
+/* Активная загрузка на карточке: цифры сверху, полоска целиком снизу */
+.job-line.stacked { flex-direction: column; align-items: stretch; gap: 5px; }
+.job-top { display: flex; align-items: center; gap: 6px; }
+.job-top .job-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 .bar {
   position: relative;
   flex: 1;

@@ -563,16 +563,21 @@ function jobLine(job: JobInfo): HTMLDivElement {
   const label = document.createElement('span');
   label.className = 'job-text';
 
+  // Цифры и кнопки — этажом выше, полоска — во всю ширину под ними
+  line.classList.add('stacked');
+  const top = document.createElement('div');
+  top.className = 'job-top';
+
   if (job.state === 'paused') {
     bar.classList.add('paused');
     label.textContent = 'пауза';
-    line.append(bar, label, resumeBtn(job), cancelBtn(job));
-    return line;
+    top.append(label, resumeBtn(job), cancelBtn(job));
+  } else {
+    label.textContent = text;
+    trackLive(job.jobId, { fill, label });
+    top.append(label, pauseBtn(job), cancelBtn(job));
   }
-
-  label.textContent = text;
-  trackLive(job.jobId, { fill, label });
-  line.append(bar, label, pauseBtn(job), cancelBtn(job));
+  line.append(top, bar);
   return line;
 }
 
