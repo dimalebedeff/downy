@@ -601,6 +601,17 @@ interface YtdlpJsonFormat {
   acodec?: string | null;
   filesize?: number | null;
   filesize_approx?: number | null;
+  /** Суммарный битрейт, КБит/с — у HLS (X и ко) размера нет, оцениваем по нему */
+  tbr?: number | null;
+}
+
+/** Вес формата: точный, приблизительный или оценка битрейт × длительность */
+function formatSize(f: YtdlpJsonFormat, durationSec?: number | null): number | undefined {
+  if (f.filesize) return f.filesize;
+  if (f.filesize_approx) return f.filesize_approx;
+  // tbr в КБит/с: × 1000 / 8 = × 125 байт в секунду
+  if (f.tbr && durationSec) return Math.round(f.tbr * 125 * durationSec);
+  return undefined;
 }
 
 function probe(req: ProbeRequest): void {
@@ -638,6 +649,7 @@ function probe(req: ProbeRequest): void {
       const info = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
         title?: string;
         thumbnail?: string;
+        duration?: number | null;
         formats?: YtdlpJsonFormat[];
       };
       const formats: ProbeFormat[] = (info.formats ?? []).map((f) => ({
@@ -645,7 +657,7 @@ function probe(req: ProbeRequest): void {
         fps: f.fps ?? undefined,
         hasVideo: !!f.vcodec && f.vcodec !== 'none',
         hasAudio: !!f.acodec && f.acodec !== 'none',
-        sizeBytes: f.filesize ?? f.filesize_approx ?? undefined,
+        sizeBytes: formatSize(f, info.duration),
       }));
       log('probe done', req.reqId, formats.length, 'formats');
       finish({ ok: true, title: info.title, thumbnailUrl: info.thumbnail, formats });
