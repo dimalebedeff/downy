@@ -214,8 +214,8 @@ function renderMedia(): void {
     ytdlpBtn.title = 'Скачать страницу через yt-dlp';
   } else {
     if (ytdlpRow.parentElement !== footerEl) footerEl.prepend(ytdlpRow);
-    ytdlpBtn.textContent = 'Скачать страницу через yt-dlp';
-    ytdlpBtn.title = '';
+    ytdlpBtn.textContent = 'Надавить на сайт';
+    ytdlpBtn.title = 'Скачать страницу через yt-dlp';
   }
 
   mediaList.textContent = '';
