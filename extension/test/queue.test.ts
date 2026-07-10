@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyReorder, isUnfinished, nextToStart, normalizeOrder } from '../src/lib/queue';
+import { applyReorder, isUnfinished, mergeVisibleOrder, nextToStart, normalizeOrder } from '../src/lib/queue';
 import type { JobInfo } from '../src/lib/types';
 
 function job(jobId: string, state: JobInfo['state'], pausedBy?: 'user' | 'preempt'): JobInfo {
@@ -62,6 +62,25 @@ describe('nextToStart', () => {
 
   it('пустая очередь — некого стартовать', () => {
     expect(nextToStart([], jobsMap())).toBeUndefined();
+  });
+});
+
+describe('mergeVisibleOrder', () => {
+  it('видимые строки встают в новом порядке, скрытые не двигаются', () => {
+    // a скрыта (её прогресс на карточке), b и c поменяли местами
+    expect(mergeVisibleOrder(['a', 'b', 'c'], ['c', 'b'])).toEqual(['a', 'c', 'b']);
+  });
+
+  it('скрытая активная остаётся во главе — реордер хвоста её не вытесняет', () => {
+    expect(mergeVisibleOrder(['active', 'b', 'c', 'd'], ['d', 'b', 'c'])).toEqual(['active', 'd', 'b', 'c']);
+  });
+
+  it('все видимы — просто новый порядок', () => {
+    expect(mergeVisibleOrder(['a', 'b'], ['b', 'a'])).toEqual(['b', 'a']);
+  });
+
+  it('незнакомые видимые id выкидываются, порядок остальных соблюдается', () => {
+    expect(mergeVisibleOrder(['a', 'b'], ['ghost', 'b', 'a'])).toEqual(['b', 'a']);
   });
 });
 

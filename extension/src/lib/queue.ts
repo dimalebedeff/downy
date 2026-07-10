@@ -43,6 +43,19 @@ export function nextToStart(order: string[], jobs: Map<string, JobInfo>): string
 }
 
 /**
+ * Полный порядок после перетаскивания видимой части очереди: скрытые
+ * строки (их прогресс живёт на карточках) остаются на своих местах,
+ * видимые встают в новом порядке.
+ */
+export function mergeVisibleOrder(full: string[], visible: string[]): string[] {
+  const fullSet = new Set(full);
+  const replay = visible.filter((id) => fullSet.has(id));
+  const moved = new Set(replay);
+  let i = 0;
+  return full.map((id) => (moved.has(id) ? replay[i++] : id));
+}
+
+/**
  * Новый порядок от попапа. Желаемому верим по составу известного:
  * чужие id выкидываем, не упомянутые оставляем в хвосте. Если наверх
  * приехал queued, а качается другой — активную надо вытеснить (пауза).

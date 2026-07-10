@@ -5,7 +5,7 @@ import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
 import { diffJobs } from '../lib/jobs-diff';
-import { isUnfinished } from '../lib/queue';
+import { isUnfinished, mergeVisibleOrder } from '../lib/queue';
 import { qualityOptions } from '../lib/ytdlp-formats';
 
 type MediaGroup = ReturnType<typeof groupMediaItems>[number];
@@ -660,10 +660,13 @@ function queueRow(job: JobInfo): HTMLLIElement {
     li.addEventListener('dragend', () => {
       li.classList.remove('dragging');
       dragId = null;
-      const order = [...jobsList.querySelectorAll<HTMLLIElement>('li.queue-row[draggable="true"]')]
+      const visible = [...jobsList.querySelectorAll<HTMLLIElement>('li.queue-row[draggable="true"]')]
         .map((el) => el.dataset.jobId ?? '')
         .filter(Boolean);
-      void chrome.runtime.sendMessage({ type: 'reorder-jobs', order });
+      // Карточные загрузки в списке не видны — мержим, чтобы реордер хвоста
+      // не задвинул их в конец и не вытеснил активную
+      const full = lastJobs.filter((j) => isUnfinished(j.state) && !j.noQueue).map((j) => j.jobId);
+      void chrome.runtime.sendMessage({ type: 'reorder-jobs', order: mergeVisibleOrder(full, visible) });
     });
   }
 
@@ -759,9 +762,9 @@ function finishedRow(job: JobInfo): HTMLLIElement {
 function renderJobs(matched: Set<string>): void {
   hasActiveJobs = lastJobs.some((j) => j.state === 'running' || j.state === 'starting' || j.state === 'queued');
   syncUpdateBtn();
-  // Очередь целиком (и карточные загрузки тоже — здесь их порядок и драг);
+  // Загрузки с карточкой показывают прогресс там — внизу их не дублируем;
   // завершённые без карточки — хвостом
-  const queue = lastJobs.filter((j) => isUnfinished(j.state));
+  const queue = lastJobs.filter((j) => isUnfinished(j.state) && !matched.has(j.jobId));
   const finished = lastJobs.filter((j) => !isUnfinished(j.state) && !matched.has(j.jobId));
   jobsSection.hidden = queue.length === 0 && finished.length === 0;
   clearJobsBtn.hidden = finished.length === 0;
