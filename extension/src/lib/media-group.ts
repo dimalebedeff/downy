@@ -34,6 +34,19 @@ export function canonicalMediaUrl(url: string): string {
  */
 export const FRESH_FIND_MS = 2 * 60_000;
 
+/** Ленты, где сетевые находки — мусор (реклама, проскролленные ролики):
+ *  видео там качается через карточку поста с yt-dlp, сниффер только шумит. */
+const SNIFF_MUTED_HOSTS = new Set(['x.com', 'twitter.com', 'mobile.twitter.com']);
+
+export function sniffMuted(pageUrl?: string): boolean {
+  if (!pageUrl) return false;
+  try {
+    return SNIFF_MUTED_HOSTS.has(new URL(pageUrl).hostname.replace(/^www\./, ''));
+  } catch {
+    return false;
+  }
+}
+
 /** Один ли это адрес страницы (hash не считается: #comment — та же страница). */
 export function samePage(a?: string, b?: string): boolean {
   if (!a || !b) return false;

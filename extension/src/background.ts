@@ -1,5 +1,5 @@
 import { classifyMedia, isProbablyVideo } from './lib/media-detect';
-import { canonicalMediaUrl } from './lib/media-group';
+import { canonicalMediaUrl, sniffMuted } from './lib/media-group';
 import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDuration } from './lib/m3u8';
 import { looksLikeMpd, mpdDuration } from './lib/mpd';
 import { buildFilename, buildYtdlpStem } from './lib/filename';
@@ -209,6 +209,9 @@ async function pageInfo(tabId: number): Promise<{ pageUrl?: string; pageTitle?: 
 }
 
 function upsertItem(item: MediaItem): void {
+  // Ленты типа X: сниффер ловит рекламу и проскролленное — не показываем,
+  // скачивание там идёт через карточку поста (yt-dlp)
+  if (sniffMuted(item.pageUrl)) return;
   const items = getTabItems(item.tabId);
   const existing = items.get(item.url);
   if (existing) {

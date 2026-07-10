@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FRESH_FIND_MS, canonicalMediaUrl, filterPageItems, groupMediaItems, samePage } from '../src/lib/media-group';
+import { FRESH_FIND_MS, canonicalMediaUrl, filterPageItems, groupMediaItems, samePage, sniffMuted } from '../src/lib/media-group';
 import type { MediaItem } from '../src/lib/types';
 
 const MB = 1024 * 1024;
@@ -98,6 +98,21 @@ describe('samePage', () => {
   it('пустые значения — не судим, отвечаем false', () => {
     expect(samePage(undefined, 'https://a.io/')).toBe(false);
     expect(samePage('https://a.io/', undefined)).toBe(false);
+  });
+});
+
+describe('sniffMuted', () => {
+  it('лента X — сниффер молчит', () => {
+    expect(sniffMuted('https://x.com/home')).toBe(true);
+    expect(sniffMuted('https://twitter.com/user/status/1')).toBe(true);
+    expect(sniffMuted('https://www.x.com/home')).toBe(true);
+  });
+
+  it('обычные сайты — сниффер работает', () => {
+    expect(sniffMuted('https://a.io/watch?v=1')).toBe(false);
+    expect(sniffMuted('https://xx.com/')).toBe(false);
+    expect(sniffMuted(undefined)).toBe(false);
+    expect(sniffMuted('не-урл')).toBe(false);
   });
 });
 
