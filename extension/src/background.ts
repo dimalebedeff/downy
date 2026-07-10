@@ -6,10 +6,12 @@ import { buildFilename, buildYtdlpStem } from './lib/filename';
 import { isNewerVersion, REPO } from './lib/update';
 import { applyReorder, isUnfinished, nextToStart, normalizeOrder } from './lib/queue';
 import { nextSpeed, type SpeedTrack } from './lib/speed';
+import { withCutSuffix } from './lib/cut';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
 import type {
   CoAppEvent,
   CoAppRequest,
+  CutRange,
   DirectJobRequest,
   HlsJobRequest,
   PongEvent,
@@ -624,12 +626,13 @@ async function startHlsJob(
   variantUrl?: string,
   variantLabel?: string,
   streams: StreamSelection = 'both',
+  cut?: CutRange,
 ): Promise<{ ok: boolean; error?: string }> {
   const dir = await resolveJobOutDir();
   if (dir.canceled) return { ok: true };
   if (dir.error) return { ok: false, error: dir.error };
   const jobId = crypto.randomUUID();
-  const filename = buildFilename(item, variantLabel, streams);
+  const filename = withCutSuffix(buildFilename(item, variantLabel, streams), cut);
   const job: JobInfo = { jobId, label: filename, state: 'queued', progress: null, sourceUrl: item.url };
   enqueueJob(job, {
     type: 'download_hls',
@@ -638,17 +641,22 @@ async function startHlsJob(
     filename,
     outDir: dir.dir,
     streams,
+    cut,
     headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
   });
   return { ok: true };
 }
 
-async function startDirectJob(item: MediaItem, streams: StreamSelection = 'both'): Promise<{ ok: boolean; error?: string }> {
+async function startDirectJob(
+  item: MediaItem,
+  streams: StreamSelection = 'both',
+  cut?: CutRange,
+): Promise<{ ok: boolean; error?: string }> {
   const dir = await resolveJobOutDir();
   if (dir.canceled) return { ok: true };
   if (dir.error) return { ok: false, error: dir.error };
   const jobId = crypto.randomUUID();
-  const filename = buildFilename(item, undefined, streams);
+  const filename = withCutSuffix(buildFilename(item, undefined, streams), cut);
   const ct = (item.contentType ?? '').toLowerCase();
   // Мелочь мимо очереди: картинки-обложки и аудио с известным скромным весом
   const audioIntent = streams === 'audio' || ct.startsWith('audio');
@@ -659,7 +667,8 @@ async function startDirectJob(item: MediaItem, streams: StreamSelection = 'both'
     label: filename,
     state: 'queued',
     progress: null,
-    totalBytes: streams === 'both' ? item.size : undefined,
+    // У отрезка вес неизвестен заранее — полный размер файла не про него
+    totalBytes: streams === 'both' && !cut ? item.size : undefined,
     sourceUrl: item.url,
     noQueue,
   };
@@ -670,6 +679,7 @@ async function startDirectJob(item: MediaItem, streams: StreamSelection = 'both'
     filename,
     outDir: dir.dir,
     streams,
+    cut,
     headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
   });
   return { ok: true };
@@ -681,6 +691,7 @@ async function startYtdlpJob(
   streams: StreamSelection = 'both',
   maxHeight?: number,
   qualityLabel?: string,
+  cut?: CutRange,
 ): Promise<{ ok: boolean; error?: string }> {
   const dir = await resolveJobOutDir();
   if (dir.canceled) return { ok: true };
@@ -691,7 +702,8 @@ async function startYtdlpJob(
   const probed = probeCache.get(pageUrl);
   const ready = probed?.status === 'ready' ? probed : undefined;
   const title = ready?.title ?? pageTitle;
-  const filenameStem = title ? buildYtdlpStem(title, pageUrl, qualityLabel, streams) : undefined;
+  const stem = title ? buildYtdlpStem(title, pageUrl, qualityLabel, streams) : undefined;
+  const filenameStem = stem ? withCutSuffix(stem, cut) : undefined;
   // Скромное аудио (вес знаем из разведки) не ждёт очередь
   let noQueue: boolean | undefined;
   if (streams === 'audio' && ready) {
@@ -717,6 +729,7 @@ async function startYtdlpJob(
     streams,
     filenameStem,
     maxHeight,
+    cut,
   });
   return { ok: true };
 }
@@ -882,7 +895,11 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         break;
       }
       case 'download-direct': {
-        sendResponse(await startDirectJob(msg.item as MediaItem, msg.streams as StreamSelection | undefined));
+        sendResponse(await startDirectJob(
+          msg.item as MediaItem,
+          msg.streams as StreamSelection | undefined,
+          msg.cut as CutRange | undefined,
+        ));
         break;
       }
       case 'download-hls': {
@@ -891,6 +908,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
           msg.variantUrl as string | undefined,
           msg.variantLabel as string | undefined,
           msg.streams as StreamSelection | undefined,
+          msg.cut as CutRange | undefined,
         );
         sendResponse(res);
         break;
@@ -902,6 +920,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
           msg.streams as StreamSelection | undefined,
           msg.maxHeight as number | undefined,
           msg.qualityLabel as string | undefined,
+          msg.cut as CutRange | undefined,
         );
         sendResponse(res);
         break;

@@ -3,6 +3,14 @@
 /** Какие дорожки сохранять: всё, только видео или только аудио */
 export type StreamSelection = 'both' | 'video' | 'audio';
 
+/** Отрезок видео в секундах; нет поля — от начала / до конца.
+ *  Рез быстрый, по ключевым кадрам: начало может захватить лишнюю
+ *  пару секунд, но момент не теряется. */
+export interface CutRange {
+  fromSec?: number;
+  toSec?: number;
+}
+
 /** Скачивание стрима (HLS или DASH) — yt-dlp понимает оба формата */
 export interface HlsJobRequest {
   type: 'download_hls';
@@ -17,6 +25,8 @@ export interface HlsJobRequest {
   streams?: StreamSelection;
   /** Резюм после паузы: точный путь недокачанного файла (без uniquePath) */
   resumePath?: string;
+  /** Скачать только отрезок (режет ffmpeg без перекодирования) */
+  cut?: CutRange;
   headers?: {
     referer?: string;
     userAgent?: string;
@@ -36,6 +46,8 @@ export interface DirectJobRequest {
   streams?: StreamSelection;
   /** Резюм после паузы: докачиваем этот файл через HTTP Range */
   resumePath?: string;
+  /** Скачать только отрезок — файл поедет через ffmpeg, а не напрямую */
+  cut?: CutRange;
   headers?: {
     referer?: string;
     userAgent?: string;
@@ -59,6 +71,8 @@ export interface YtdlpJobRequest {
   maxHeight?: number;
   /** Резюм после паузы: точный путь недокачанного файла (без uniquePath) */
   resumePath?: string;
+  /** Скачать только отрезок: yt-dlp --download-sections */
+  cut?: CutRange;
 }
 
 /** Скачать только обложку страницы (yt-dlp --write-thumbnail, конверт в jpg) */

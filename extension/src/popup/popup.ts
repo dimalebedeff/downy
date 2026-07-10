@@ -1,5 +1,6 @@
 import type { JobInfo, MediaItem, ProbeState } from '../lib/types';
-import type { StreamSelection } from '../../../shared/protocol';
+import type { CutRange, StreamSelection } from '../../../shared/protocol';
+import { makeCut } from '../lib/cut';
 import { fmtSize, jobProgressView } from '../lib/progress';
 import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
@@ -209,6 +210,49 @@ function removeBtn(urls: string[]): HTMLButtonElement {
   return btn;
 }
 
+/** Поля «от – до» на карточке: повторный вызов прячет. Валидный ввод — run(cut). */
+function toggleCutRow(body: HTMLElement, run: (cut: CutRange) => void): void {
+  const existing = body.querySelector('.cut-row');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+  const row = document.createElement('div');
+  row.className = 'cut-row';
+  const mkInput = (ph: string, title: string): HTMLInputElement => {
+    const i = document.createElement('input');
+    i.placeholder = ph;
+    i.title = title;
+    return i;
+  };
+  const from = mkInput('0:00', 'Начало отрезка: секунды, мм:сс или чч:мм:сс');
+  const to = mkInput('до конца', 'Конец отрезка: секунды, мм:сс или чч:мм:сс');
+  const dash = document.createElement('span');
+  dash.className = 'cut-dash';
+  dash.textContent = '–';
+  const go = document.createElement('button');
+  go.className = 'primary cut-go';
+  go.textContent = '✂';
+  go.title = 'Скачать отрезок';
+  const submit = (): void => {
+    const cut = makeCut(from.value, to.value);
+    if (!cut) {
+      row.classList.add('cut-bad');
+      setTimeout(() => row.classList.remove('cut-bad'), 800);
+      return;
+    }
+    row.remove();
+    run(cut);
+  };
+  go.addEventListener('click', submit);
+  row.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
+  });
+  row.append(from, dash, to, go);
+  body.append(row);
+  from.focus();
+}
+
 /** Клик по превью качает обложку; при ховере — подсказка поверх картинки. */
 function makeThumbDownloadable(thumbBox: HTMLDivElement, run: () => void): void {
   thumbBox.classList.add('thumb-dl');
@@ -401,7 +445,7 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
     const btn = document.createElement('button');
     btn.className = 'primary';
     btn.textContent = 'Скачать';
-    const start = async (streams: StreamSelection): Promise<void> => {
+    const start = async (streams: StreamSelection, cut?: CutRange): Promise<void> => {
       btn.disabled = true;
       const res = await chrome.runtime.sendMessage({
         type: 'download-ytdlp',
@@ -410,6 +454,7 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
         streams,
         maxHeight: select.value ? Number(select.value) : undefined,
         qualityLabel: select.selectedOptions[0]?.dataset.q,
+        cut,
       });
       if (!res?.ok) showError(res?.error ?? 'Помощник недоступен');
       setTimeout(() => (btn.disabled = false), 1500);
@@ -424,6 +469,7 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
       openKebab(kebab, [
         { label: 'Скачать только видео', run: () => void start('video') },
         { label: 'Скачать только звук', run: () => void start('audio') },
+        { label: 'Скачать отрезок…', run: () => toggleCutRow(body, (cut) => void start('both', cut)) },
         {
           label: 'Скачать обложку',
           run: () => {
@@ -478,8 +524,8 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
   const btn = document.createElement('button');
   btn.className = 'primary';
   btn.textContent = 'Скачать';
-  const start = (streams: StreamSelection): void => {
-    void download(chosen(), item.kind === 'hls' ? select : null, streams, btn);
+  const start = (streams: StreamSelection, cut?: CutRange): void => {
+    void download(chosen(), item.kind === 'hls' ? select : null, streams, btn, cut);
   };
   btn.addEventListener('click', () => start('both'));
 
@@ -494,6 +540,13 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
       actions.push(
         { label: 'Скачать только видео', run: () => start('video') },
         { label: 'Скачать только звук', run: () => start('audio') },
+        {
+          label: 'Скачать отрезок…',
+          run: () => {
+            const body = kebab.closest<HTMLElement>('.card-body');
+            if (body) toggleCutRow(body, (cut) => start('both', cut));
+          },
+        },
       );
     }
     const coverUrl = coverUrlFor(item);
@@ -610,16 +663,17 @@ async function download(
   select: HTMLSelectElement | null,
   streams: StreamSelection,
   btn: HTMLButtonElement,
+  cut?: CutRange,
 ): Promise<void> {
   btn.disabled = true;
   try {
     if (item.kind === 'direct') {
-      const res = await chrome.runtime.sendMessage({ type: 'download-direct', item, streams });
+      const res = await chrome.runtime.sendMessage({ type: 'download-direct', item, streams, cut });
       if (!res?.ok) showError(res?.error ?? 'Не удалось начать скачивание');
     } else {
       const variantUrl = select?.value;
       const variantLabel = select?.selectedOptions[0]?.textContent ?? undefined;
-      const res = await chrome.runtime.sendMessage({ type: 'download-hls', item, variantUrl, variantLabel, streams });
+      const res = await chrome.runtime.sendMessage({ type: 'download-hls', item, variantUrl, variantLabel, streams, cut });
       if (!res?.ok) showError(res?.error ?? 'Помощник недоступен');
     }
   } finally {

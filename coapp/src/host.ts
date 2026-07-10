@@ -6,6 +6,7 @@ import path from 'node:path';
 import { readMessages, sendMessage } from './nm';
 import type {
   CoAppRequest,
+  CutRange,
   DirectJobRequest,
   HlsJobRequest,
   JobEvent,
@@ -213,8 +214,9 @@ function startHls(req: HlsJobRequest): void {
   }
 
   // yt-dlp качает сегменты параллельно и обходит троттлинг на одно соединение;
-  // ffmpeg (последовательный) — только фолбэк
-  if (ytdlpWorks()) startHlsYtdlp(req, outFile, streams);
+  // ffmpeg (последовательный) — фолбэк и путь для отрезков: -ss пропускает
+  // сегменты до начала, качается только нужный кусок
+  if (ytdlpWorks() && !req.cut) startHlsYtdlp(req, outFile, streams);
   else startFfmpegCopy(req, outFile, streams);
 }
 
@@ -330,6 +332,7 @@ function stripTracks(jobId: string, srcFile: string, outFile: string, streams: '
 interface FfmpegCopySource {
   jobId: string;
   url: string;
+  cut?: CutRange;
   headers?: { referer?: string; userAgent?: string };
 }
 
@@ -337,10 +340,14 @@ function startFfmpegCopy(req: FfmpegCopySource, outFile: string, streams: Stream
   const args = ['-y', '-nostdin', '-hide_banner'];
   if (req.headers?.userAgent) args.push('-user_agent', req.headers.userAgent);
   if (req.headers?.referer) args.push('-referer', req.headers.referer);
+  // -ss до -i — быстрый пропуск до ключевого кадра, без чтения всего начала
+  if (req.cut?.fromSec) args.push('-ss', String(req.cut.fromSec));
   args.push('-i', req.url);
   if (streams === 'video') args.push('-map', '0:v');
   else if (streams === 'audio') args.push('-map', '0:a');
   args.push('-c', 'copy');
+  const cutDur = req.cut?.toSec != null ? req.cut.toSec - (req.cut.fromSec ?? 0) : undefined;
+  if (cutDur && cutDur > 0) args.push('-t', String(cutDur));
   if (/\.(mp4|m4a|mov)$/i.test(outFile)) args.push('-movflags', '+faststart');
   args.push('-progress', 'pipe:1', outFile);
 
@@ -375,7 +382,12 @@ function startFfmpegCopy(req: FfmpegCopySource, outFile: string, streams: Stream
     let progress: number | null = null;
     if (timeMatch && durationSec) {
       const done = Number(timeMatch[1]) * 3600 + Number(timeMatch[2]) * 60 + parseFloat(timeMatch[3]);
-      progress = Math.min(0.999, done / durationSec);
+      // out_time считает выход (уже относительно начала отрезка) — шкалу
+      // меряем длиной отрезка, а не всего ролика
+      const from = req.cut?.fromSec ?? 0;
+      const end = req.cut?.toSec != null ? Math.min(req.cut.toSec, durationSec) : durationSec;
+      const total = end - from;
+      if (total > 0) progress = Math.min(0.999, done / total);
     }
     emit({
       type: 'job',
@@ -420,9 +432,10 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
     return;
   }
 
-  // Отдельную дорожку из файла умеет вырезать только ffmpeg (без перекодирования)
+  // Отдельную дорожку или отрезок из файла умеет вырезать только ffmpeg
+  // (без перекодирования; отрезок читается прямо по http range)
   const streams = req.streams ?? 'both';
-  if (streams !== 'both') {
+  if (streams !== 'both' || req.cut) {
     startFfmpegCopy(req, outFile, streams);
     return;
   }
@@ -553,6 +566,8 @@ function startYtdlp(req: YtdlpJobRequest): void {
   }
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
   args.push(...ytdlpFormatArgs(streams, req.maxHeight));
+  // Отрезок: yt-dlp качает только нужную секцию (режет ffmpeg по ключевым кадрам)
+  if (req.cut) args.push('--download-sections', `*${req.cut.fromSec ?? 0}-${req.cut.toSec ?? 'inf'}`);
   args.push(req.pageUrl);
 
   log('yt-dlp start', req.jobId, req.pageUrl, 'streams:', streams, 'maxHeight:', req.maxHeight ?? 'best');
