@@ -33,12 +33,12 @@ interface PageVideo {
   pageHref?: string;
   title?: string;
   thumb?: string;
+  probe?: ProbeState;
 }
 
 let activeTab: chrome.tabs.Tab | undefined;
 let pageThumb: string | undefined;
-let pageVideo: PageVideo | undefined;
-let pageProbe: ProbeState | undefined;
+let pageVideos: PageVideo[] = [];
 let lastItems: MediaItem[] = [];
 let lastJobs: JobInfo[] = [];
 
@@ -196,6 +196,19 @@ function downloadCover(item: MediaItem, coverUrl: string): void {
   });
 }
 
+/** Крестик в правом верхнем углу карточки: убрать находку из списка. */
+function removeBtn(urls: string[]): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.className = 'card-remove';
+  btn.textContent = '✕';
+  btn.title = 'Убрать из списка';
+  btn.addEventListener('click', async () => {
+    await chrome.runtime.sendMessage({ type: 'remove-media', tabId: activeTab?.id, urls });
+    void refresh();
+  });
+  return btn;
+}
+
 /** Клик по превью качает обложку; при ховере — подсказка поверх картинки. */
 function makeThumbDownloadable(thumbBox: HTMLDivElement, run: () => void): void {
   thumbBox.classList.add('thumb-dl');
@@ -211,17 +224,19 @@ function renderMedia(): void {
   liveBars.clear();
   // SPA меняет ролики без перезагрузки — старьё с прошлых адресов не показываем
   const groups = groupMediaItems(filterPageItems(lastItems, activeTab?.url));
-  // Страница с MSE-видео (ютуб и ко) — своя карточка, если больше ничего не поймали
-  const showPageCard =
-    groups.length === 0 && !!pageVideo?.url &&
-    (!activeTab?.url || samePage(pageVideo.pageHref ?? pageVideo.url, activeTab.url));
-  lastHasMedia = groups.length > 0 || showPageCard;
+  // Страница с MSE-видео (ютуб, лента X) — свои карточки, если больше ничего
+  // не поймали; показываем только найденное на текущем адресе вкладки
+  const currentPageVideos = pageVideos.filter(
+    (pv) => !activeTab?.url || samePage(pv.pageHref ?? pv.url, activeTab.url),
+  );
+  const showPageCards = groups.length === 0 && currentPageVideos.length > 0;
+  lastHasMedia = groups.length > 0 || showPageCards;
   emptyEl.hidden = lastHasMedia;
   refreshDot();
 
   // yt-dlp: звезда пустого экрана, скромная строчка — когда медиа есть.
-  // Карточка страницы сама качает через yt-dlp — дубль-строчка не нужна.
-  ytdlpRow.hidden = showPageCard;
+  // Карточки страницы сами качают через yt-dlp — дубль-строчка не нужна.
+  ytdlpRow.hidden = showPageCards;
   if (!emptyEl.hidden) {
     if (ytdlpRow.parentElement !== emptyEl) emptyEl.append(ytdlpRow);
     ytdlpBtn.textContent = 'Надавить на сайт';
@@ -235,10 +250,12 @@ function renderMedia(): void {
   mediaList.textContent = '';
   const matched = new Set<string>();
 
-  if (showPageCard && pageVideo) {
-    const job = findJobByUrls(new Set([pageVideo.url]));
-    if (job) matched.add(job.jobId);
-    mediaList.append(pageVideoCard(pageVideo, job));
+  if (showPageCards) {
+    for (const pv of currentPageVideos) {
+      const job = findJobByUrls(new Set([pv.url]));
+      if (job) matched.add(job.jobId);
+      mediaList.append(pageVideoCard(pv, job));
+    }
   }
 
   for (const group of groups) {
@@ -305,7 +322,7 @@ function renderMedia(): void {
       body.append(actionsRow(group));
     }
 
-    li.append(thumbBox, body);
+    li.append(thumbBox, body, removeBtn([...groupUrls(group)]));
     mediaList.append(li);
   }
 
@@ -337,7 +354,7 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
   const body = document.createElement('div');
   body.className = 'card-body';
 
-  const probeReady = pageProbe?.status === 'ready' ? pageProbe : undefined;
+  const probeReady = pv.probe?.status === 'ready' ? pv.probe : undefined;
 
   const title = document.createElement('div');
   title.className = 'card-title';
@@ -371,7 +388,7 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
         opt.dataset.q = q.label.split(' · ')[0];
         select.append(opt);
       }
-    } else if (pageProbe?.status === 'pending') {
+    } else if (pv.probe?.status === 'pending') {
       // Точки бегут интервалом в init — селект живой, пока идёт разведка
       const opt = new Option('Пробив', '', true, true);
       opt.disabled = true;
@@ -419,7 +436,7 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
     body.append(row);
   }
 
-  li.append(thumbBox, body);
+  li.append(thumbBox, body, removeBtn([pv.url]));
   return li;
 }
 
@@ -819,15 +836,14 @@ async function refresh(): Promise<void> {
   if (activeTab?.id == null) return;
   const res = await chrome.runtime.sendMessage({ type: 'get-media', tabId: activeTab.id });
   pageThumb = res?.pageThumb;
-  pageVideo = res?.pageVideo;
-  pageProbe = res?.probe;
+  pageVideos = res?.pageVideos ?? [];
   lastItems = res?.items ?? [];
   const jobs: JobInfo[] = res?.jobs ?? [];
   const jobsKind = diffJobs(lastJobs, jobs);
   lastJobs = jobs;
   // Перерисовка стирает CSS-переходы и мигает превью — делаем её только
   // когда реально изменился состав карточек, а не цифры прогресса
-  const snap = JSON.stringify([pageThumb, pageVideo, pageProbe, lastItems]);
+  const snap = JSON.stringify([pageThumb, pageVideos, lastItems]);
   if (snap !== mediaSnapshot || jobsKind === 'structural' || needsRender) {
     mediaSnapshot = snap;
     renderMedia();

@@ -35,7 +35,12 @@ interface PageVideo {
   title?: string;
   thumb?: string;
 }
-const tabPageVideo = new Map<number, PageVideo>();
+/** Видео-посты вкладки: url поста → карточка. Копятся при скролле ленты,
+ *  чтобы проскролленное не пропадало из попапа. */
+const tabPageVideos = new Map<number, Map<string, PageVideo>>();
+const PAGE_VIDEOS_MAX = 10;
+/** Убранные крестиком находки — не возвращаются до перезагрузки вкладки */
+const tabRemoved = new Map<number, Set<string>>();
 const jobs = new Map<string, JobInfo>();
 const inflightHls = new Set<string>();
 
@@ -114,16 +119,21 @@ function enqueueJob(job: JobInfo, req: CoAppRequest): void {
 // Service worker может быть выгружен в любой момент — состояние живёт в storage.session
 const restored: Promise<void> = (async () => {
   const data = await chrome.storage.session.get([
-    'tabMedia', 'jobs', 'tabVariantUrls', 'tabPageThumb', 'tabPageVideo', 'queueOrder', 'jobRequests',
+    'tabMedia', 'jobs', 'tabVariantUrls', 'tabPageThumb', 'tabPageVideos', 'tabRemoved', 'queueOrder', 'jobRequests',
   ]);
   if (data.tabPageThumb) {
     for (const [tabId, thumb] of Object.entries(data.tabPageThumb as Record<string, string>)) {
       tabPageThumb.set(Number(tabId), thumb);
     }
   }
-  if (data.tabPageVideo) {
-    for (const [tabId, pv] of Object.entries(data.tabPageVideo as Record<string, PageVideo>)) {
-      tabPageVideo.set(Number(tabId), pv);
+  if (data.tabPageVideos) {
+    for (const [tabId, vids] of Object.entries(data.tabPageVideos as Record<string, Record<string, PageVideo>>)) {
+      tabPageVideos.set(Number(tabId), new Map(Object.entries(vids)));
+    }
+  }
+  if (data.tabRemoved) {
+    for (const [tabId, urls] of Object.entries(data.tabRemoved as Record<string, string[]>)) {
+      tabRemoved.set(Number(tabId), new Set(urls));
     }
   }
   if (data.tabMedia) {
@@ -172,11 +182,16 @@ function persist(): void {
     for (const [tabId, items] of tabMedia) tm[tabId] = Object.fromEntries(items);
     const tv: Record<string, string[]> = {};
     for (const [tabId, urls] of tabVariantUrls) tv[tabId] = [...urls];
+    const tpv: Record<string, Record<string, PageVideo>> = {};
+    for (const [tabId, vids] of tabPageVideos) tpv[tabId] = Object.fromEntries(vids);
+    const trm: Record<string, string[]> = {};
+    for (const [tabId, urls] of tabRemoved) trm[tabId] = [...urls];
     void chrome.storage.session.set({
       tabMedia: tm,
       tabVariantUrls: tv,
       tabPageThumb: Object.fromEntries(tabPageThumb),
-      tabPageVideo: Object.fromEntries(tabPageVideo),
+      tabPageVideos: tpv,
+      tabRemoved: trm,
       jobs: Object.fromEntries(jobs),
       queueOrder,
       jobRequests: Object.fromEntries(jobRequests),
@@ -197,7 +212,8 @@ function clearTab(tabId: number): void {
   tabMedia.delete(tabId);
   tabVariantUrls.delete(tabId);
   tabPageThumb.delete(tabId);
-  tabPageVideo.delete(tabId);
+  tabPageVideos.delete(tabId);
+  tabRemoved.delete(tabId);
   persist();
 }
 
@@ -212,6 +228,8 @@ function upsertItem(item: MediaItem): void {
   // Ленты типа X: сниффер ловит рекламу и проскролленное — не показываем,
   // скачивание там идёт через карточку поста (yt-dlp)
   if (sniffMuted(item.pageUrl)) return;
+  // Убранное крестиком не возвращаем
+  if (tabRemoved.get(item.tabId)?.has(item.url)) return;
   const items = getTabItems(item.tabId);
   const existing = items.get(item.url);
   if (existing) {
@@ -797,16 +815,21 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         if (mse && pageUrl) {
           // В ленте (x.com/home) качаем не страницу, а конкретный пост
           const videoUrl = mse.url ?? pageUrl;
-          // Наследуем title/thumb только того же видео: SPA мог сменить ролик
-          const prev = tabPageVideo.get(tabId);
-          const sameVideo = prev?.url === videoUrl;
-          tabPageVideo.set(tabId, {
-            url: videoUrl,
-            pageHref: pageUrl,
-            title: pageTitle ?? (sameVideo ? prev?.title : undefined),
-            thumb: mse.thumb ?? (sameVideo ? prev?.thumb : undefined),
-          });
-          persist();
+          if (!tabRemoved.get(tabId)?.has(videoUrl)) {
+            const vids = tabPageVideos.get(tabId) ?? new Map<string, PageVideo>();
+            const existing = vids.get(videoUrl);
+            if (existing) {
+              // Дозрели данные — дольём, позицию в списке не трогаем
+              if (mse.thumb && !existing.thumb) existing.thumb = mse.thumb;
+              if (pageTitle && !existing.title) existing.title = pageTitle;
+            } else {
+              vids.set(videoUrl, { url: videoUrl, pageHref: pageUrl, title: pageTitle, thumb: mse.thumb });
+              // Ленту можно листать бесконечно — старьё выпихиваем
+              while (vids.size > PAGE_VIDEOS_MAX) vids.delete(vids.keys().next().value!);
+            }
+            tabPageVideos.set(tabId, vids);
+            persist();
+          }
         }
         for (const entry of (msg.media ?? []) as { url: string; thumb?: string }[]) {
           const kind = classifyMedia(entry.url);
@@ -829,17 +852,33 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         const tabId = msg.tabId as number;
         const items = [...(tabMedia.get(tabId)?.values() ?? [])].sort((a, b) => a.foundAt - b.foundAt);
         for (const item of items) requestThumb(item);
-        // Страница с MSE-видео — сразу заряжаем разведку качеств
-        const pageVideo = tabPageVideo.get(tabId);
+        // Видео-посты вкладки — сразу заряжаем разведку качеств каждому
+        const pageVideos = [...(tabPageVideos.get(tabId)?.values() ?? [])].map((v) => ({
+          ...v,
+          probe: ensureProbe(v.url),
+        }));
         // Заодно оживляем очередь, если она встала (например, CoApp падал)
         pump();
         sendResponse({
           items,
           jobs: jobList(),
           pageThumb: tabPageThumb.get(tabId),
-          pageVideo,
-          probe: pageVideo ? ensureProbe(pageVideo.url) : undefined,
+          pageVideos,
         });
+        break;
+      }
+      case 'remove-media': {
+        // Крестик на карточке: прячем находку и не даём ей вернуться
+        const tabId = msg.tabId as number;
+        const removed = tabRemoved.get(tabId) ?? new Set<string>();
+        for (const url of (msg.urls as string[]) ?? []) {
+          removed.add(url);
+          tabMedia.get(tabId)?.delete(url);
+          tabPageVideos.get(tabId)?.delete(url);
+        }
+        tabRemoved.set(tabId, removed);
+        persist();
+        sendResponse({ ok: true });
         break;
       }
       case 'download-direct': {
