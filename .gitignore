@@ -10,3 +10,10 @@ coapp/run-host.bat
 
 CLAUDE.md
 claude-def.md
+bot/config.json
+bot/session.txt
+bot/state.json
+bot/tmp/
+bot/run-bot*.bat
+bot/run-bot*.vbs
+bot/task.xml

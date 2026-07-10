@@ -10,5 +10,5 @@
     "types": ["chrome", "node"],
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["extension/src", "extension/test", "coapp/src", "shared"]
+  "include": ["extension/src", "extension/test", "coapp/src", "shared", "bot/src", "bot/test"]
 }

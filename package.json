@@ -4,12 +4,16 @@
   "version": "0.10.0",
   "description": "Расширение для скачивания видео и аудио с любых сайтов",
   "type": "module",
+  "workspaces": [
+    "bot"
+  ],
   "scripts": {
     "build": "node build.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "coapp:install": "node coapp/install.mjs",
-    "coapp:fetch-bins": "node coapp/fetch-bins.mjs"
+    "coapp:fetch-bins": "node coapp/fetch-bins.mjs",
+    "bot:install": "node bot/install.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.2.2",

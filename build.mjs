@@ -38,4 +38,17 @@ await build({
   logLevel: 'info',
 });
 
+// --- Телеграм-бот ---
+// packages: external — бандлим только свой код, gramjs остаётся в node_modules
+await build({
+  entryPoints: [path.join(root, 'bot/src/bot.ts')],
+  bundle: true,
+  packages: 'external',
+  platform: 'node',
+  format: 'cjs',
+  target: 'node20',
+  outfile: path.join(root, 'bot/dist/bot.cjs'),
+  logLevel: 'info',
+});
+
 console.log('Build done.');
