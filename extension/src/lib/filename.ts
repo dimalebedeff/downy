@@ -1,4 +1,7 @@
+import { localDateStamp, sanitizeFilename } from '../../../shared/filename';
 import type { StreamSelection } from '../../../shared/protocol';
+
+export { localDateStamp, sanitizeFilename };
 
 const EXT_BY_TYPE: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -22,17 +25,6 @@ const EXT_BY_TYPE: Record<string, string> = {
   'image/webp': 'webp',
   'image/gif': 'gif',
 };
-
-const FORBIDDEN_CHARS = new RegExp('[\\\\/:*?"<>|]|[\\u0000-\\u001f]', 'g');
-
-export function sanitizeFilename(name: string): string {
-  const cleaned = name
-    .replace(FORBIDDEN_CHARS, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[. ]+$/, '');
-  return (cleaned || 'video').slice(0, 120).trim();
-}
 
 export function filenameFromUrl(url: string): string {
   try {
@@ -58,12 +50,6 @@ export interface FilenameSource {
   pageUrl?: string;
   pageTitle?: string;
   contentType?: string;
-}
-
-/** Локальная дата скачивания для имени файла: 2026-07-10 */
-export function localDateStamp(date: Date = new Date()): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
 }
 
 /** Хеши из CDN-ссылок в имени не нужны — пишем хотя бы откуда скачано */

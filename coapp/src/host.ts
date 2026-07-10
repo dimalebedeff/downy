@@ -1,8 +1,18 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  binWorks,
+  cleanupPartials,
+  createYtdlpEngine,
+  HLS_CONCURRENCY,
+  killProcessTree,
+  makeYtdlpStdoutHandler,
+  uniquePath,
+  YTDLP_COMMON_ARGS,
+} from '../../shared/ytdlp';
 import { readMessages, sendMessage } from './nm';
 import type {
   CoAppRequest,
@@ -11,7 +21,6 @@ import type {
   HlsJobRequest,
   JobEvent,
   PickDirRequest,
-  ProbeFormat,
   ProbeRequest,
   StreamSelection,
   ThumbnailJobRequest,
@@ -36,35 +45,8 @@ function log(...args: unknown[]): void {
   }
 }
 
-function findBin(name: string): string {
-  const local = path.join(binDir, `${name}.exe`);
-  return fs.existsSync(local) ? local : name; // иначе надеемся на PATH
-}
-
-const ffmpegPath = findBin('ffmpeg');
-const ytdlpPath = findBin('yt-dlp');
-
-function binWorks(bin: string, versionArg: string): boolean {
-  try {
-    return spawnSync(bin, [versionArg], { windowsHide: true, timeout: 10_000 }).status === 0;
-  } catch {
-    return false;
-  }
-}
-
-let ytdlpOkCache: boolean | null = null;
-function ytdlpWorks(): boolean {
-  if (ytdlpOkCache == null) ytdlpOkCache = binWorks(ytdlpPath, '--version');
-  return ytdlpOkCache;
-}
-
-// Сегменты HLS качаем параллельно: последовательная загрузка упирается в
-// задержку сети и per-connection-троттлинг CDN (ВК и т.п.)
-const HLS_CONCURRENCY = '8';
-
-// Без --encoding yt-dlp пишет в stdout в кодировке консоли (cp1251) — кириллица
-// в путях превращается в кракозябры, и «показать в папке» не находит файл
-const YTDLP_COMMON_ARGS = ['--newline', '--encoding', 'utf-8'];
+const engine = createYtdlpEngine({ binDir, log });
+const { ffmpegPath, ytdlpPath } = engine;
 
 const defaultOutDir = path.join(os.homedir(), 'Downloads', 'downy');
 
@@ -72,16 +54,6 @@ function resolveOutDir(requested?: string): string {
   const dir = requested?.trim() || defaultOutDir;
   fs.mkdirSync(dir, { recursive: true });
   return dir;
-}
-
-function uniquePath(dir: string, filename: string): string {
-  const ext = path.extname(filename);
-  const stem = filename.slice(0, filename.length - ext.length);
-  let candidate = path.join(dir, filename);
-  for (let i = 2; fs.existsSync(candidate); i++) {
-    candidate = path.join(dir, `${stem} (${i})${ext}`);
-  }
-  return candidate;
 }
 
 interface RunningJob {
@@ -97,19 +69,7 @@ function processJob(child: ChildProcess): RunningJob {
   return {
     canceled: false,
     paused: false,
-    kill() {
-      const pid = child.pid;
-      if (pid) {
-        // yt-dlp порождает ffmpeg — убиваем всё дерево процессов
-        try {
-          spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true });
-          return;
-        } catch {
-          // ниже — фолбэк
-        }
-      }
-      child.kill();
-    },
+    kill: () => killProcessTree(child),
   };
 }
 
@@ -144,55 +104,9 @@ function jobDone(
   }
 }
 
-/**
- * Парсер stdout yt-dlp: строки прогресса вида
- * "[download]  42.5% of   12.34MiB at  1.23MiB/s ETA 00:05" и путь итогового файла.
- */
-function makeYtdlpStdoutHandler(jobId: string, onOutFile?: (file: string) => void): (d: Buffer) => void {
-  let lastSent = 0;
-  return (d: Buffer) => {
-    const s = d.toString();
-    if (onOutFile) {
-      const dest = s.match(/\[download\] Destination: (.+)/) ?? s.match(/\[Merger\] Merging formats into "(.+)"/);
-      if (dest) onOutFile(dest[1].trim());
-    }
-    const pct = s.match(/\[download\]\s+([\d.]+)%(?:\s+of\s+~?\s*([\d.]+)(B|KiB|MiB|GiB|TiB))?/);
-    if (!pct) return;
-    const now = Date.now();
-    if (now - lastSent < 1000) return;
-    lastSent = now;
-    const progress = Math.min(0.999, parseFloat(pct[1]) / 100);
-    let totalBytes: number | undefined;
-    if (pct[2]) {
-      const mult = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 }[pct[3] as 'B' | 'KiB' | 'MiB' | 'GiB' | 'TiB'];
-      totalBytes = Math.round(parseFloat(pct[2]) * mult);
-    }
-    emit({
-      type: 'job',
-      jobId,
-      state: 'running',
-      progress,
-      totalBytes,
-      bytes: totalBytes ? Math.round(totalBytes * progress) : undefined,
-    });
-  };
-}
-
-/** Убирает сам файл и хвосты yt-dlp (.part, .part-FragN, .ytdl) */
-function cleanupPartials(outFile: string): void {
-  const dir = path.dirname(outFile);
-  const base = path.basename(outFile);
-  try {
-    for (const f of fs.readdirSync(dir)) {
-      // Только известные суффиксы yt-dlp: по голому префиксу можно зацепить
-      // чужой файл вида «имя.mp4.bak»
-      if (f === base || f.startsWith(`${base}.part`) || f === `${base}.ytdl`) {
-        fs.rmSync(path.join(dir, f), { force: true });
-      }
-    }
-  } catch {
-    // папку могли удалить — не мешаем завершению джоба
-  }
+/** Прогресс yt-dlp → событие job для расширения */
+function ytdlpProgressToEmit(jobId: string): (p: { progress: number; bytes?: number; totalBytes?: number }) => void {
+  return (p) => emit({ type: 'job', jobId, state: 'running', progress: p.progress, bytes: p.bytes, totalBytes: p.totalBytes });
 }
 
 function startHls(req: HlsJobRequest): void {
@@ -216,7 +130,7 @@ function startHls(req: HlsJobRequest): void {
   // yt-dlp качает сегменты параллельно и обходит троттлинг на одно соединение;
   // ffmpeg (последовательный) — фолбэк и путь для отрезков: -ss пропускает
   // сегменты до начала, качается только нужный кусок
-  if (ytdlpWorks() && !req.cut) startHlsYtdlp(req, outFile, streams);
+  if (engine.ytdlpWorks() && !req.cut) startHlsYtdlp(req, outFile, streams);
   else startFfmpegCopy(req, outFile, streams);
 }
 
@@ -237,7 +151,7 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelec
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
 
   let errTail = '';
-  child.stdout?.on('data', makeYtdlpStdoutHandler(req.jobId));
+  child.stdout?.on('data', makeYtdlpStdoutHandler(ytdlpProgressToEmit(req.jobId)));
   child.stderr?.on('data', (d: Buffer) => {
     errTail = (errTail + d.toString()).slice(-2000);
   });
@@ -521,165 +435,50 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
   }
 }
 
-/** Локальная дата скачивания для имени файла: 2026-07-10 */
-function localDateStamp(date = new Date()): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
-}
-
-/** Формат-строка yt-dlp: предпочитаем mp4/m4a, качество не выше maxHeight */
-function ytdlpFormatArgs(streams: StreamSelection, maxHeight?: number): string[] {
-  const h = maxHeight ? `[height<=${maxHeight}]` : '';
-  if (streams === 'video') return ['-f', `bestvideo${h}[ext=mp4]/bestvideo${h}/best${h}`];
-  if (streams === 'audio') return ['-f', 'bestaudio[ext=m4a]/bestaudio/best'];
-  return ['-f', `bestvideo${h}[ext=mp4]+bestaudio[ext=m4a]/bestvideo${h}+bestaudio/best${h}`];
-}
-
 function startYtdlp(req: YtdlpJobRequest): void {
-  let outDir: string;
-  try {
-    outDir = resolveOutDir(req.outDir);
-  } catch (e) {
-    emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: String(e) });
-    return;
-  }
-
-  const streams = req.streams ?? 'both';
-  const args = [
-    ...YTDLP_COMMON_ARGS, '--no-playlist',
-    '--concurrent-fragments', HLS_CONCURRENCY,
-  ];
-  let presetOutFile = '';
-  if (req.resumePath || req.filenameStem) {
-    // Резюм продолжает тот же файл; новое имя защищаем от перезаписи
-    presetOutFile = req.resumePath ?? uniquePath(outDir, req.filenameStem + (streams === 'audio' ? '.m4a' : '.mp4'));
-    args.push('-o', presetOutFile);
-    // Контейнер в имени обещан — держим слово, даже если лучший кодек в webm
-    if (streams === 'both') args.push('--merge-output-format', 'mp4');
-    else if (streams === 'video') args.push('--remux-video', 'mp4');
-    else args.push('--remux-video', 'm4a');
-  } else {
-    // Разведка не прошла — yt-dlp именует сам; дата вместо мусорного айдишника,
-    // force-overwrites — иначе повторная закачка молча скипнется
-    const nameSuffix = { both: '', video: ' [видео]', audio: ' [аудио]' }[streams];
-    args.push('--force-overwrites', '-P', outDir, '-o', `%(title).120s${nameSuffix} [${localDateStamp()}].%(ext)s`);
-  }
-  if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
-  args.push(...ytdlpFormatArgs(streams, req.maxHeight));
-  // Отрезок: yt-dlp качает только нужную секцию (режет ffmpeg по ключевым
-  // кадрам). Ютубу не предлагаем — его SABR-потоки ffmpeg не читает
-  if (req.cut) args.push('--download-sections', `*${req.cut.fromSec ?? 0}-${req.cut.toSec ?? 'inf'}`);
-  args.push(req.pageUrl);
-
-  log('yt-dlp start', req.jobId, req.pageUrl, 'streams:', streams, 'maxHeight:', req.maxHeight ?? 'best');
-  const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-  const job = processJob(child);
+  const handle = engine.download(
+    {
+      pageUrl: req.pageUrl,
+      outDir: req.outDir?.trim() || defaultOutDir,
+      streams: req.streams,
+      filenameStem: req.filenameStem,
+      maxHeight: req.maxHeight,
+      resumePath: req.resumePath,
+      cut: req.cut,
+    },
+    {
+      onProgress: ytdlpProgressToEmit(req.jobId),
+      onFinish: (r) => {
+        jobs.delete(req.jobId);
+        if (r.state === 'done') {
+          emit({ type: 'job', jobId: req.jobId, state: 'done', progress: 1, outFile: r.outFile });
+        } else if (r.state === 'paused') {
+          emit({ type: 'job', jobId: req.jobId, state: 'paused', progress: null, outFile: r.outFile });
+        } else if (r.state === 'canceled') {
+          emit({ type: 'job', jobId: req.jobId, state: 'canceled', progress: null });
+        } else {
+          emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: r.message });
+        }
+      },
+    },
+  );
+  const job: RunningJob = {
+    canceled: false,
+    paused: false,
+    kill() {
+      if (this.paused) handle.pause();
+      else handle.cancel();
+    },
+  };
   jobs.set(req.jobId, job);
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
-
-  let outFile = presetOutFile;
-  let errTail = '';
-
-  child.stdout?.on('data', makeYtdlpStdoutHandler(req.jobId, (f) => {
-    if (!presetOutFile) outFile = f;
-  }));
-
-  child.stderr?.on('data', (d: Buffer) => {
-    errTail = (errTail + d.toString()).slice(-2000);
-  });
-
-  child.on('error', (e) => {
-    jobs.delete(req.jobId);
-    log('yt-dlp spawn error', e.message);
-    emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: `Не удалось запустить yt-dlp: ${e.message}` });
-  });
-
-  child.on('close', (code) => {
-    log('yt-dlp exit', req.jobId, code, 'canceled:', job.canceled, 'paused:', job.paused);
-    if (job.paused) {
-      jobs.delete(req.jobId);
-      // Без preset-имени резюм перезапустит yt-dlp — тот сам подхватит свои .part
-      emit({ type: 'job', jobId: req.jobId, state: 'paused', progress: null, outFile: presetOutFile || undefined });
-    } else {
-      jobDone(req.jobId, code, job, outFile, errTail);
-    }
-  });
 }
 
 // ---------- Разведка форматов (yt-dlp -J) ----------
 
-const PROBE_TIMEOUT_MS = 30_000;
-
-interface YtdlpJsonFormat {
-  height?: number | null;
-  fps?: number | null;
-  vcodec?: string | null;
-  acodec?: string | null;
-  filesize?: number | null;
-  filesize_approx?: number | null;
-  /** Суммарный битрейт, КБит/с — у HLS (X и ко) размера нет, оцениваем по нему */
-  tbr?: number | null;
-}
-
-/** Вес формата: точный, приблизительный или оценка битрейт × длительность */
-function formatSize(f: YtdlpJsonFormat, durationSec?: number | null): number | undefined {
-  if (f.filesize) return f.filesize;
-  if (f.filesize_approx) return f.filesize_approx;
-  // tbr в КБит/с: × 1000 / 8 = × 125 байт в секунду
-  if (f.tbr && durationSec) return Math.round(f.tbr * 125 * durationSec);
-  return undefined;
-}
-
 function probe(req: ProbeRequest): void {
-  const args = [...YTDLP_COMMON_ARGS, '--no-playlist', '-J', req.pageUrl];
-  log('probe start', req.reqId, req.pageUrl);
-  const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-
-  const chunks: Buffer[] = [];
-  let errTail = '';
-  let finished = false;
-  const finish = (payload: { ok: boolean; error?: string; title?: string; thumbnailUrl?: string; formats?: ProbeFormat[] }): void => {
-    if (finished) return;
-    finished = true;
-    clearTimeout(timer);
-    sendMessage({ type: 'probe', reqId: req.reqId, ...payload });
-  };
-  const timer = setTimeout(() => {
-    log('probe timeout', req.pageUrl);
-    child.kill('SIGKILL');
-    finish({ ok: false, error: 'Разведка форматов не уложилась в 30 секунд' });
-  }, PROBE_TIMEOUT_MS);
-
-  child.stdout?.on('data', (d: Buffer) => chunks.push(d));
-  child.stderr?.on('data', (d: Buffer) => {
-    errTail = (errTail + d.toString()).slice(-1000);
-  });
-  child.on('error', (e) => finish({ ok: false, error: `Не удалось запустить yt-dlp: ${e.message}` }));
-  child.on('close', (code) => {
-    if (code !== 0) {
-      log('probe failed', req.reqId, code, errTail.slice(-300));
-      finish({ ok: false, error: errTail.slice(-500) || `yt-dlp: exit code ${code}` });
-      return;
-    }
-    try {
-      const info = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
-        title?: string;
-        thumbnail?: string;
-        duration?: number | null;
-        formats?: YtdlpJsonFormat[];
-      };
-      const formats: ProbeFormat[] = (info.formats ?? []).map((f) => ({
-        height: f.height ?? undefined,
-        fps: f.fps ?? undefined,
-        hasVideo: !!f.vcodec && f.vcodec !== 'none',
-        hasAudio: !!f.acodec && f.acodec !== 'none',
-        sizeBytes: formatSize(f, info.duration),
-      }));
-      log('probe done', req.reqId, formats.length, 'formats');
-      finish({ ok: true, title: info.title, thumbnailUrl: info.thumbnail, formats });
-    } catch (e) {
-      finish({ ok: false, error: `Разбор ответа yt-dlp: ${e instanceof Error ? e.message : String(e)}` });
-    }
+  void engine.probe(req.pageUrl).then((r) => {
+    sendMessage({ type: 'probe', reqId: req.reqId, ...r });
   });
 }
 

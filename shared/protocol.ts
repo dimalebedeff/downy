@@ -109,6 +109,8 @@ export interface ProbeEvent {
   error?: string;
   title?: string;
   thumbnailUrl?: string;
+  /** Длительность ролика в секундах, если yt-dlp её знает */
+  durationSec?: number;
   formats?: ProbeFormat[];
 }
 
