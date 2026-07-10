@@ -9,7 +9,8 @@ interface DomMediaEntry {
 
 const reported = new Map<string, string | undefined>(); // url -> отправленный thumb
 let sentPageThumb: string | undefined;
-let sentMseKey = 'no'; // 'no' | 'yes' | 'thumb' — что уже сообщили про MSE-видео
+// Что уже сообщили про MSE-видео: какой пост и было ли превью
+let sentMse: { key: string; hasThumb: boolean } | null = null;
 let mseHref = location.href; // SPA меняет ролик без перезагрузки — начинаем сначала
 
 function absUrl(raw: string): string | null {
@@ -61,13 +62,24 @@ function mediaThumb(el: HTMLElement): string | undefined {
   return captureFrame(video);
 }
 
-/** Видео, играющее через MSE (blob:) — файл руками не взять, но yt-dlp справится. */
-function mseVideo(): { thumb?: string } | null {
+/** Постоянная ссылка на пост с видео (лента X и подобных):
+ *  yt-dlp не умеет качать /home, ему нужен адрес конкретного поста. */
+function postUrl(v: HTMLElement): string | undefined {
+  const a = v.closest('article')?.querySelector<HTMLAnchorElement>('a[href*="/status/"]');
+  return a ? absUrl(a.href) ?? undefined : undefined;
+}
+
+/** Видео, играющее через MSE (blob:) — файл руками не взять, но yt-dlp справится.
+ *  В ленте видео много — берём играющее, а не первое попавшееся. */
+function mseVideo(): { url?: string; thumb?: string } | null {
+  let fallback: HTMLVideoElement | null = null;
   for (const v of document.querySelectorAll('video')) {
     const src = v.currentSrc || v.src || '';
-    if (src.startsWith('blob:')) return { thumb: mediaThumb(v) };
+    if (!src.startsWith('blob:')) continue;
+    if (!v.paused) return { url: postUrl(v), thumb: mediaThumb(v) };
+    fallback ??= v;
   }
-  return null;
+  return fallback ? { url: postUrl(fallback), thumb: mediaThumb(fallback) } : null;
 }
 
 function collect(): void {
@@ -88,15 +100,16 @@ function collect(): void {
   const pageThumbChanged = pt !== sentPageThumb;
   if (location.href !== mseHref) {
     mseHref = location.href;
-    sentMseKey = 'no';
+    sentMse = null;
   }
   const mse = mseVideo();
-  const mseKey = mse ? (mse.thumb ? 'thumb' : 'yes') : 'no';
-  // Про MSE сообщаем при появлении и когда дозрело превью; исчезновение не откатываем
-  const mseChanged = mse != null && mseKey !== sentMseKey && sentMseKey !== 'thumb';
+  // Про MSE сообщаем при появлении, смене поста (скролл ленты) и когда
+  // дозрело превью; исчезновение не откатываем
+  const mseChanged =
+    mse != null && (sentMse?.key !== (mse.url ?? '') || (!sentMse.hasThumb && !!mse.thumb));
   if (media.length || pageThumbChanged || mseChanged) {
     sentPageThumb = pt;
-    if (mseChanged) sentMseKey = mseKey;
+    if (mseChanged && mse) sentMse = { key: mse.url ?? '', hasThumb: !!mse.thumb };
     void chrome.runtime
       .sendMessage({
         type: 'dom-media',

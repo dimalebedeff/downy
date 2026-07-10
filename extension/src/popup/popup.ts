@@ -27,7 +27,10 @@ const footerEl = $<HTMLElement>('footer');
 const kebabMenu = $<HTMLDivElement>('#kebab-menu');
 
 interface PageVideo {
+  /** Что качать yt-dlp: ссылка поста из ленты либо адрес страницы */
   url: string;
+  /** Адрес вкладки, где видео нашли */
+  pageHref?: string;
   title?: string;
   thumb?: string;
 }
@@ -210,7 +213,8 @@ function renderMedia(): void {
   const groups = groupMediaItems(filterPageItems(lastItems, activeTab?.url));
   // Страница с MSE-видео (ютуб и ко) — своя карточка, если больше ничего не поймали
   const showPageCard =
-    groups.length === 0 && !!pageVideo?.url && (!activeTab?.url || samePage(pageVideo.url, activeTab.url));
+    groups.length === 0 && !!pageVideo?.url &&
+    (!activeTab?.url || samePage(pageVideo.pageHref ?? pageVideo.url, activeTab.url));
   lastHasMedia = groups.length > 0 || showPageCard;
   emptyEl.hidden = lastHasMedia;
   refreshDot();

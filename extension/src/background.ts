@@ -28,7 +28,10 @@ const tabVariantUrls = new Map<number, Set<string>>();
 const tabPageThumb = new Map<number, string>();
 // Страницы с MSE-видео (blob:) — файл по сети не взять, предлагаем yt-dlp
 interface PageVideo {
+  /** Что качать yt-dlp: ссылка поста из ленты либо адрес страницы */
   url: string;
+  /** Адрес вкладки, где видео нашли, — по нему попап решает, показывать ли карточку */
+  pageHref?: string;
   title?: string;
   thumb?: string;
 }
@@ -786,16 +789,19 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
           tabPageThumb.set(tabId, pageThumb);
           persist();
         }
-        const mse = msg.mseVideo as { thumb?: string } | undefined;
+        const mse = msg.mseVideo as { url?: string; thumb?: string } | undefined;
         const pageUrl = msg.pageUrl as string | undefined;
         if (mse && pageUrl) {
-          // Наследуем title/thumb только той же страницы: SPA мог сменить ролик
+          // В ленте (x.com/home) качаем не страницу, а конкретный пост
+          const videoUrl = mse.url ?? pageUrl;
+          // Наследуем title/thumb только того же видео: SPA мог сменить ролик
           const prev = tabPageVideo.get(tabId);
-          const samePage = prev?.url === pageUrl;
+          const sameVideo = prev?.url === videoUrl;
           tabPageVideo.set(tabId, {
-            url: pageUrl,
-            title: pageTitle ?? (samePage ? prev?.title : undefined),
-            thumb: mse.thumb ?? (samePage ? prev?.thumb : undefined),
+            url: videoUrl,
+            pageHref: pageUrl,
+            title: pageTitle ?? (sameVideo ? prev?.title : undefined),
+            thumb: mse.thumb ?? (sameVideo ? prev?.thumb : undefined),
           });
           persist();
         }
