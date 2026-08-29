@@ -2,11 +2,12 @@
 // Запуск: npm run coapp:fetch-bins
 
 import { execSync } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { nextSpeed, renderLine } from './download-progress.mjs';
 
 const coappDir = path.dirname(fileURLToPath(import.meta.url));
 const binDir = path.join(coappDir, 'bin');
@@ -15,12 +16,55 @@ fs.mkdirSync(binDir, { recursive: true });
 const YTDLP_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
 const FFMPEG_ZIP_URL = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';
 
+/** Живая перерисовка одной строки; молча выходит, если stdout — не терминал */
+function makeReporter(name, total) {
+  const tty = process.stdout.isTTY;
+  let track;
+  let lastDraw = 0;
+  const paint = (downloaded, force) => {
+    const now = Date.now();
+    if (!force && now - lastDraw < 150) return;
+    lastDraw = now;
+    track = nextSpeed(track, downloaded, now);
+    const line = renderLine({ name, downloaded, total, speedBps: track?.bps });
+    if (tty) process.stdout.write(`\r${line}\x1b[K`);
+  };
+  return {
+    tick: (downloaded) => paint(downloaded, false),
+    done: (downloaded) => {
+      paint(downloaded, true);
+      if (tty) process.stdout.write('\n');
+    },
+  };
+}
+
 async function download(url, dest) {
-  console.log(`Скачиваю ${url}`);
+  const name = path.basename(dest);
+  console.log(`Скачиваю ${name}…`);
   const resp = await fetch(url, { redirect: 'follow' });
   if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status} для ${url}`);
-  await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(dest));
-  console.log(`  -> ${dest} (${(fs.statSync(dest).size / 1024 / 1024).toFixed(1)} МБ)`);
+
+  const total = Number(resp.headers.get('content-length')) || 0;
+  const reporter = makeReporter(name, total);
+  const out = fs.createWriteStream(dest);
+  let downloaded = 0;
+  try {
+    for await (const chunk of Readable.fromWeb(resp.body)) {
+      downloaded += chunk.length;
+      if (!out.write(chunk)) await once(out, 'drain');
+      reporter.tick(downloaded);
+    }
+    out.end();
+    await once(out, 'finish');
+  } catch (err) {
+    out.destroy();
+    fs.rmSync(dest, { force: true });
+    throw err;
+  }
+  reporter.done(downloaded);
+  if (!process.stdout.isTTY) {
+    console.log(`  -> ${dest} (${(fs.statSync(dest).size / 1024 / 1024).toFixed(1)} МБ)`);
+  }
 }
 
 function findFileRecursive(dir, name) {
