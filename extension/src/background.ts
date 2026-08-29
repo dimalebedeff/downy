@@ -645,7 +645,14 @@ async function startHlsJob(
   if (dir.error) return { ok: false, error: dir.error };
   const jobId = crypto.randomUUID();
   const filename = withCutSuffix(buildFilename(item, variantLabel, streams), cut);
-  const job: JobInfo = { jobId, label: filename, state: 'queued', progress: null, sourceUrl: item.url };
+  const job: JobInfo = {
+    jobId,
+    label: filename,
+    state: 'queued',
+    progress: null,
+    sourceUrl: item.url,
+    mediaKind: streams === 'audio' ? 'audio' : 'video',
+  };
   enqueueJob(job, {
     type: 'download_hls',
     jobId,
@@ -683,6 +690,7 @@ async function startDirectJob(
     totalBytes: streams === 'both' && !cut ? item.size : undefined,
     sourceUrl: item.url,
     noQueue,
+    mediaKind: ct.startsWith('image') ? 'image' : audioIntent ? 'audio' : 'video',
   };
   enqueueJob(job, {
     type: 'download_direct',
@@ -732,6 +740,7 @@ async function startYtdlpJob(
     progress: null,
     sourceUrl: pageUrl,
     noQueue,
+    mediaKind: streams === 'audio' ? 'audio' : 'video',
   };
   enqueueJob(job, {
     type: 'download_ytdlp',
@@ -755,7 +764,14 @@ async function startThumbnailJob(pageUrl: string, pageTitle?: string): Promise<{
   const probed = probeCache.get(pageUrl);
   const title = (probed?.status === 'ready' ? probed.title : undefined) ?? pageTitle;
   const filenameStem = buildYtdlpStem(title, pageUrl, 'обложка', 'both');
-  const job: JobInfo = { jobId, label: filenameStem, state: 'queued', progress: null, noQueue: true };
+  const job: JobInfo = {
+    jobId,
+    label: filenameStem,
+    state: 'queued',
+    progress: null,
+    noQueue: true,
+    mediaKind: 'image',
+  };
   enqueueJob(job, { type: 'download_thumbnail', jobId, pageUrl, filenameStem, outDir: dir.dir });
   return { ok: true };
 }

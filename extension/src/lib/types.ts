@@ -1,5 +1,6 @@
 import type { HlsVariant } from './m3u8';
 import type { MediaKind } from './media-detect';
+import type { FileKind } from './media-icon';
 import type { ProbeFormat } from '../../../shared/protocol';
 
 /** Состояние разведки форматов страницы (yt-dlp -J), кешируется в фоне */
@@ -30,6 +31,8 @@ export interface MediaItem {
 export interface JobInfo {
   jobId: string;
   label: string;
+  /** Тип контента для иконки в списке — известен ещё до появления outFile */
+  mediaKind?: FileKind;
   /** URL медиа (или страницы для yt-dlp) — по нему попап находит карточку загрузки */
   sourceUrl?: string;
   state: 'queued' | 'starting' | 'running' | 'paused' | 'done' | 'error' | 'canceled';

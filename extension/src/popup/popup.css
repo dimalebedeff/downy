@@ -588,8 +588,9 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 /* «Открыть» — компактная текстовая кнопка */
 .open-btn { flex: none; font-size: 11px; padding: 0 2px; }
 
-/* Иконочная кнопка (папка) — без подписи, действие в тултипе */
-.icon-btn {
+/* Иконочная кнопка папки — без подписи, действие в тултипе.
+   Свой класс, а не общий .icon-btn: у того контурные SVG (шестерёнка). */
+.folder-btn {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -601,9 +602,10 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
   border-radius: 6px;
   background: none;
   color: var(--muted);
+  cursor: pointer;
 }
-.icon-btn svg { fill: currentColor; }
-.icon-btn:hover { background: var(--chip); color: var(--accent-deep); }
+.folder-btn svg { fill: currentColor; }
+.folder-btn:hover { background: var(--chip); color: var(--accent-deep); }
 
 /* ---------- Подвал ---------- */
 

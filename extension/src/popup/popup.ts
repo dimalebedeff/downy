@@ -678,7 +678,9 @@ function folderBtn(outFile: string): HTMLButtonElement {
 function typeIcon(job: JobInfo): HTMLSpanElement {
   const span = document.createElement('span');
   span.className = 'type-icon';
-  span.innerHTML = typeIconSvg(mediaKindFromFile(job.outFile ?? job.label));
+  // Точный тип из задачи (известен сразу), иначе — угадываем по расширению
+  const kind = job.mediaKind ?? mediaKindFromFile(job.outFile ?? job.label);
+  span.innerHTML = typeIconSvg(kind);
   return span;
 }
 
