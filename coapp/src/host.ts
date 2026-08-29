@@ -650,6 +650,14 @@ function showInFolder(target: string): void {
   spawn('explorer.exe', [arg], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
 }
 
+function openFile(target: string): void {
+  log('open_file', target);
+  // Файла уже нет — не открываем «пустоту», показываем хотя бы папку.
+  if (!fs.existsSync(target)) return showInFolder(target);
+  // explorer сам выберет приложение по ассоциации (плеер, просмотрщик).
+  spawn('explorer.exe', [`"${target}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+}
+
 // ---------- Самообновление ----------
 
 const REPO = 'dimalebedeff/downy';
@@ -807,6 +815,9 @@ readMessages((raw) => {
       break;
     case 'show_in_folder':
       showInFolder(msg.path);
+      break;
+    case 'open_file':
+      openFile(msg.path);
       break;
     case 'download_hls':
       startHls(msg);

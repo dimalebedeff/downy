@@ -149,6 +149,12 @@ export interface ShowInFolderRequest {
   path: string;
 }
 
+/** Открыть скачанный файл дефолтным приложением (плеер, просмотрщик) */
+export interface OpenFileRequest {
+  type: 'open_file';
+  path: string;
+}
+
 /** Обновить Downy до релиза с GitHub: скачать zipball, пересобрать */
 export interface UpdateRequest {
   type: 'update';
@@ -181,6 +187,7 @@ export type CoAppRequest =
   | PickDirRequest
   | ThumbRequest
   | ShowInFolderRequest
+  | OpenFileRequest
   | UpdateRequest;
 
 export interface PongEvent {

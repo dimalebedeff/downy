@@ -1013,6 +1013,10 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         sendResponse(sendToCoApp({ type: 'show_in_folder', path: msg.path as string }));
         break;
       }
+      case 'open-file': {
+        sendResponse(sendToCoApp({ type: 'open_file', path: msg.path as string }));
+        break;
+      }
       case 'clear-jobs': {
         for (const [id, job] of jobs) {
           if (job.state === 'done' || job.state === 'error' || job.state === 'canceled') {

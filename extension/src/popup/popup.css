@@ -580,7 +580,30 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
   text-overflow: ellipsis;
 }
 .tail-job .bar { margin-top: 5px; }
-.show-btn { flex: none; font-size: 11px; padding: 0 2px; }
+
+/* Иконка типа медиа перед названием — фирменный жёлтый */
+.type-icon { flex: none; display: inline-flex; align-items: center; color: var(--accent); }
+.type-ic { display: block; fill: currentColor; }
+
+/* «Открыть» — компактная текстовая кнопка */
+.open-btn { flex: none; font-size: 11px; padding: 0 2px; }
+
+/* Иконочная кнопка (папка) — без подписи, действие в тултипе */
+.icon-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+}
+.icon-btn svg { fill: currentColor; }
+.icon-btn:hover { background: var(--chip); color: var(--accent-deep); }
 
 /* ---------- Подвал ---------- */
 

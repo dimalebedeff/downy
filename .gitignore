@@ -1,5 +1,6 @@
 node_modules/
 dist/
+vendor/
 coapp/bin/
 coapp/host-manifest*.json
 coapp/run-host.bat

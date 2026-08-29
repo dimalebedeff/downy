@@ -2,6 +2,7 @@ import type { JobInfo, MediaItem, ProbeState } from '../lib/types';
 import type { CutRange, StreamSelection } from '../../../shared/protocol';
 import { finishTimecode, isYoutubeUrl, makeCut, maskTimecode } from '../lib/cut';
 import { fmtSize, jobProgressView } from '../lib/progress';
+import { mediaKindFromFile, typeIconSvg } from '../lib/media-icon';
 import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
@@ -649,6 +650,38 @@ function resumeBtn(job: JobInfo): HTMLButtonElement {
   });
 }
 
+/** «Открыть» — запускает файл дефолтным приложением через хост */
+function openBtn(outFile: string): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.className = 'link-btn open-btn';
+  btn.textContent = 'Открыть';
+  btn.title = outFile;
+  btn.addEventListener('click', async () => {
+    const res = await chrome.runtime.sendMessage({ type: 'open-file', path: outFile });
+    if (!res?.ok) showError(res?.error ?? 'Не удалось открыть файл');
+  });
+  return btn;
+}
+
+/** Компактная иконка папки — «Показать в папке» */
+function folderBtn(outFile: string): HTMLButtonElement {
+  const btn = smallBtn('icon-btn folder-btn', '', 'Показать в папке', async () => {
+    const res = await chrome.runtime.sendMessage({ type: 'show-in-folder', path: outFile });
+    if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку');
+  });
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg>';
+  return btn;
+}
+
+/** Жёлтая иконка типа медиа перед названием в списке загрузок */
+function typeIcon(job: JobInfo): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.className = 'type-icon';
+  span.innerHTML = typeIconSvg(mediaKindFromFile(job.outFile ?? job.label));
+  return span;
+}
+
 /** Незавершённая загрузка в карточке: шкала с кометой, пауза, отмена. */
 function jobLine(job: JobInfo): HTMLDivElement {
   const line = document.createElement('div');
@@ -701,15 +734,7 @@ function doneLine(job: JobInfo): HTMLDivElement {
   label.textContent = fmtSize(job.bytes);
   line.append(label);
   if (job.outFile) {
-    const show = document.createElement('button');
-    show.className = 'link-btn show-btn';
-    show.textContent = 'Показать в папке';
-    show.title = job.outFile;
-    show.addEventListener('click', async () => {
-      const res = await chrome.runtime.sendMessage({ type: 'show-in-folder', path: job.outFile });
-      if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку');
-    });
-    line.append(show);
+    line.append(openBtn(job.outFile), folderBtn(job.outFile));
   }
   return line;
 }
@@ -845,7 +870,7 @@ function queueRow(job: JobInfo, withBar: boolean): HTMLLIElement {
 
   const state = document.createElement('span');
   state.className = 'job-text';
-  row.append(title, state);
+  row.append(typeIcon(job), title, state);
 
   if (job.state === 'queued') {
     state.classList.add('queued');
@@ -904,18 +929,10 @@ function finishedRow(job: JobInfo): HTMLLIElement {
     state.classList.add('err');
     state.textContent = 'ошибка';
   }
-  row.append(title, state);
+  row.append(typeIcon(job), title, state);
 
   if (job.state === 'done' && job.outFile) {
-    const show = document.createElement('button');
-    show.className = 'link-btn show-btn';
-    show.textContent = 'в папке';
-    show.title = job.outFile;
-    show.addEventListener('click', async () => {
-      const res = await chrome.runtime.sendMessage({ type: 'show-in-folder', path: job.outFile });
-      if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку');
-    });
-    row.append(show);
+    row.append(openBtn(job.outFile), folderBtn(job.outFile));
   }
 
   li.append(row);
