@@ -1,7 +1,7 @@
 {
   "name": "downy-bot",
   "private": true,
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Телеграм-бот Downy: ссылка в чат — видео в ответ",
   "type": "module",
   "dependencies": {
