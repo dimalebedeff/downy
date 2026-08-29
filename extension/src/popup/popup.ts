@@ -751,7 +751,7 @@ function syncUpdateBtn(): void {
 
 async function initUpdater(): Promise<void> {
   const versionEl = $<HTMLAnchorElement>('#version');
-  versionEl.textContent = `YaDaun v${chrome.runtime.getManifest().version}`;
+  versionEl.textContent = `Downy v${chrome.runtime.getManifest().version}`;
   versionEl.href = `https://github.com/${REPO}`;
   versionEl.title = 'Открыть проект на GitHub';
   const status = await chrome.runtime.sendMessage({ type: 'check-update' });
@@ -763,7 +763,7 @@ async function initUpdater(): Promise<void> {
     updateBtn.disabled = true;
     updateBtn.textContent = 'Устанавливаю…';
   } else {
-    updateBtn.textContent = `Обновить YaDaun до ${status.tag}`;
+    updateBtn.textContent = `Обновить Downy до ${status.tag}`;
     syncUpdateBtn();
   }
   updateBtn.addEventListener('click', async () => {
@@ -1087,7 +1087,7 @@ async function init(): Promise<void> {
       setBanner(`Помощник работает, но не хватает: ${missing.join(', ')}.\nЗапусти npm run coapp:fetch-bins в папке расширения.`, true, true);
     } else {
       coappOk = true;
-      setBanner(`Помощник YaDaun v${status.info?.version} на связи — ffmpeg и yt-dlp на месте.`, false, false);
+      setBanner(`Помощник Downy v${status.info?.version} на связи — ffmpeg и yt-dlp на месте.`, false, false);
     }
   } else {
     coappOk = false;
