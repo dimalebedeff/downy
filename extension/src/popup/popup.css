@@ -500,15 +500,18 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 .cancel-btn,
 .pause-btn {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: none;
   color: var(--muted);
   padding: 0 3px;
-  font-size: 14px;
   line-height: 1;
 }
+.cancel-btn svg,
+.pause-btn svg { display: block; }
 .cancel-btn:hover { color: var(--err); }
-.pause-btn { font-size: 12px; }
 .pause-btn:hover { color: var(--accent-deep); }
 
 .job-msg {

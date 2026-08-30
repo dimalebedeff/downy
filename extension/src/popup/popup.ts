@@ -618,20 +618,32 @@ function smallBtn(cls: string, glyph: string, title: string, onClick: () => void
   return btn;
 }
 
+/** Иконка кнопки: свой контур вместо системного глифа */
+function iconBtn(cls: string, inner: string, title: string, onClick: () => void): HTMLButtonElement {
+  const btn = smallBtn(cls, '', title, onClick);
+  btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">${inner}</svg>`;
+  return btn;
+}
+
+const ICON_PAUSE = '<path d="M8 5h3v14H8zM13 5h3v14h-3z" fill="currentColor"/>';
+const ICON_PLAY = '<path d="M8 5v14l11-7z" fill="currentColor"/>';
+const ICON_CROSS =
+  '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>';
+
 function cancelBtn(job: JobInfo): HTMLButtonElement {
-  return smallBtn('cancel-btn', '✕', 'Отменить', () => {
+  return iconBtn('cancel-btn', ICON_CROSS, 'Отменить', () => {
     void chrome.runtime.sendMessage({ type: 'cancel-job', jobId: job.jobId });
   });
 }
 
 function pauseBtn(job: JobInfo): HTMLButtonElement {
-  return smallBtn('pause-btn', '⏸', 'Пауза', () => {
+  return iconBtn('pause-btn', ICON_PAUSE, 'Пауза', () => {
     void chrome.runtime.sendMessage({ type: 'pause-job', jobId: job.jobId });
   });
 }
 
 function resumeBtn(job: JobInfo): HTMLButtonElement {
-  return smallBtn('pause-btn', '▶', 'Продолжить', () => {
+  return iconBtn('pause-btn', ICON_PLAY, 'Продолжить', () => {
     void chrome.runtime.sendMessage({ type: 'resume-job', jobId: job.jobId });
   });
 }
@@ -936,7 +948,7 @@ function queueRow(job: JobInfo): HTMLLIElement {
 
 /** Убрать одну завершённую загрузку: раньше был только «очистить» на все */
 function forgetBtn(job: JobInfo): HTMLButtonElement {
-  return smallBtn('cancel-btn', '✕', 'Убрать из списка', async () => {
+  return iconBtn('cancel-btn', ICON_CROSS, 'Убрать из списка', async () => {
     log(`убираем из списка ${job.jobId}`);
     const res = await chrome.runtime.sendMessage({ type: 'remove-job', jobId: job.jobId });
     lastJobs = res?.jobs ?? lastJobs.filter((j) => j.jobId !== job.jobId);

@@ -6,6 +6,7 @@
 
 import { bestFromSrcset } from './lib/pick';
 import { fmtSize } from './lib/progress';
+import { typeIconSvg, type FileKind } from './lib/media-icon';
 
 interface DomMediaEntry {
   url: string;
@@ -302,11 +303,12 @@ function ui(): ShadowRoot {
     '@keyframes ttIn { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }',
     '@keyframes ttOut { to { opacity: 0; transform: translateY(4px) scale(.98); } }',
     '.tt-row { display: flex; align-items: center; gap: 8px; padding: 8px 11px; }',
-    '.tt-icon { flex: none; font-size: 12px; color: #94740a; }',
+    '.tt-icon { flex: none; display: inline-flex; align-items: center; color: #94740a; }',
+    '.tt-icon svg { display: block; }',
     '.tt-name { flex: 1; min-width: 0; font-size: 12px; font-weight: 600;',
     '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
     '.tt-state { flex: none; font-size: 11px; color: #6e7278; font-variant-numeric: tabular-nums; }',
-    '.tt-state.ok { color: #94740a; font-weight: 700; }',
+    '.tt-state.ok { color: #94740a; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }',
     '.tt-state.err { color: #dc2626; font-weight: 700; }',
     '.tt-spin { flex: none; width: 12px; height: 12px; border-radius: 50%;',
     '  border: 2px solid #ececef; border-top-color: #f5c518; animation: spin .7s linear infinite; }',
@@ -445,7 +447,7 @@ function pickAt(x: number, y: number): PickTarget | null {
 }
 
 function frameLabel(t: PickTarget): string {
-  if (isTaken(t)) return '✓ уже взято';
+  if (isTaken(t)) return 'уже взято';
   if (t.kind === 'image') {
     // Настоящий размер файла, а не растянутый на экране: сразу видно, что
     // под курсором мелкая обложка, а не полноразмерный снимок
@@ -744,10 +746,12 @@ function cornerBox(): HTMLDivElement {
   return box;
 }
 
+const ICON_KINDS = new Set<FileKind>(['video', 'image', 'audio', 'other']);
+
 function toastIcon(kind?: string): HTMLSpanElement {
   const span = document.createElement('span');
   span.className = 'tt-icon';
-  span.textContent = kind === 'image' ? '🖼' : kind === 'audio' ? '♪' : '▶';
+  span.innerHTML = typeIconSvg(ICON_KINDS.has(kind as FileKind) ? (kind as FileKind) : 'video');
   return span;
 }
 
@@ -851,10 +855,15 @@ function updateToast(job: PageJob): void {
   t.finished = true;
   t.spin.remove();
   t.bar.remove();
+  t.state.textContent = '';
   const quick = Date.now() - t.startedAt < TOAST_LONG_MS;
   if (job.state === 'done') {
     t.state.className = 'tt-state ok';
-    t.state.textContent = `✓ ${fmtSize(job.bytes) || 'готово'}`;
+    t.state.innerHTML =
+      '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+      '<path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6"' +
+      ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    t.state.append(fmtSize(job.bytes) || 'готово');
     // Быстрая загрузка сама себе уведомление о старте: показали и убрали
     dropToast(job.jobId, quick ? 900 : 4500);
   } else {
