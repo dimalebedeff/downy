@@ -295,21 +295,25 @@ function ui(): ShadowRoot {
   (document.head ?? document.documentElement).append(face);
 
   style.textContent = [
+    ':host, .corner, .menu, .panel, .frame { box-sizing: border-box; }',
+    '.menu *, .panel *, .corner * { box-sizing: border-box; }',
     '.frame { position: fixed; border: 2px solid #f5c518; border-radius: 6px;',
     '  box-shadow: 0 0 14px rgba(245, 197, 24, .55); pointer-events: none; }',
     '.frame.taken { border-color: #22c55e; box-shadow: 0 0 14px rgba(34, 197, 94, .5); }',
     '.tag { position: absolute; top: -11px; left: -2px; padding: 1px 6px; border-radius: 5px;',
     "  background: #f5c518; color: #1b1c20; font: 600 11px/1.5 'Downy Golos', system-ui, sans-serif; white-space: nowrap; }",
     '.frame.taken .tag { background: #22c55e; color: #fff; }',
-    '.menu { position: fixed; min-width: 168px; padding: 4px; border: 1px solid #e3e4e8;',
+    '.menu { position: fixed; min-width: 218px; max-width: 320px; overflow: hidden;',
+    '  padding: 4px; border: 1px solid #e3e4e8;',
     '  border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(20, 20, 25, .18);',
     "  font: 400 13px/1.4 'Downy Golos', system-ui, sans-serif; pointer-events: auto; }",
     /* Пункт с двумя зонами: слева действие, справа — что именно скачается */
     '.split { display: flex; align-items: stretch; border-radius: 6px; overflow: hidden; }',
     '.split:hover { background: #ececef; }',
-    '.split .main { flex: 1; min-width: 0; padding: 6px 10px; border: none; background: none;',
-    '  font: inherit; text-align: left; cursor: pointer; color: #1b1c20; }',
-    '.split .more { flex: none; display: inline-flex; align-items: center; gap: 4px;',
+    '.split .main { flex: 1 1 auto; min-width: 0; padding: 6px 10px; border: none; background: none;',
+    '  font: inherit; text-align: left; cursor: pointer; color: #1b1c20;',
+    '  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+    '.split .more { flex: 0 0 auto; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px;',
     '  padding: 0 8px; border: none; border-left: 1px solid #d9dade; background: #f0f0f2;',
     "  color: #1b1c20; font: 600 11px/1 'Downy Golos', system-ui, sans-serif; cursor: pointer; }",
     '.split .more:hover { background: #f5c518; color: #1b1c20; }',
@@ -618,7 +622,7 @@ function openMenu(x: number, y: number, items: MenuItem[]): void {
   const root = ui();
   menuEl = document.createElement('div');
   menuEl.className = 'menu';
-  menuEl.style.left = `${Math.max(4, Math.min(x, window.innerWidth - 210))}px`;
+  menuEl.style.left = `${Math.max(4, Math.min(x, window.innerWidth - 240))}px`;
   menuEl.style.top = `${Math.max(4, Math.min(y, window.innerHeight - 24 - items.length * 30))}px`;
   for (const item of items) menuEl.append(menuRow(item));
   root.append(menuEl);
