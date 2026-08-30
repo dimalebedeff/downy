@@ -942,13 +942,6 @@ function forgetBtn(job: JobInfo): HTMLButtonElement {
   });
 }
 
-/** «14:32» — время окончания; дата не нужна, список чистится руками */
-function fmtFinished(at?: number): string {
-  if (!at) return '';
-  const d = new Date(at);
-  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
 function finishedRow(job: JobInfo): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'tail-job';
@@ -971,11 +964,13 @@ function finishedRow(job: JobInfo): HTMLLIElement {
     state.classList.add('err');
     state.textContent = 'ошибка';
   }
-  const at = document.createElement('span');
-  at.className = 'job-at';
-  at.textContent = fmtFinished(job.finishedAt);
-  at.title = job.finishedAt ? new Date(job.finishedAt).toLocaleString() : '';
-  row.append(typeIcon(job), title, at, state);
+  // Время окончания — в подсказку названия: в строке оно спорит с размером
+  // и читается как длительность ролика
+  if (job.finishedAt) {
+    title.title = `${job.outFile ?? job.label}
+скачано ${new Date(job.finishedAt).toLocaleString()}`;
+  }
+  row.append(typeIcon(job), title, state);
 
   if (job.state === 'done' && job.outFile) {
     row.append(openBtn(job.outFile), folderBtn(job.outFile));
