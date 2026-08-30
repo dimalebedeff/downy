@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assetIds, bestFromSrcset, imageStem } from '../src/lib/pick';
+import { assetIds, bestFromSrcset, imageStem, previewSiblings } from '../src/lib/pick';
 
 describe('bestFromSrcset', () => {
   it('берёт самую большую ширину, а не последнюю запись', () => {
@@ -111,5 +111,32 @@ describe('assetIds: имя файла не идентификатор', () => {
     const prev = assetIds('https://vr-1.ozone.ru/vod/video-71/01M026G6STB3E8TQXRQ8J0MS2W/preview.mp4');
     expect(full).toEqual(['01M026G6STB3E8TQXRQ8J0MS2W']);
     expect(prev).toEqual(full);
+  });
+});
+
+describe('previewSiblings', () => {
+  const PREVIEW = 'https://vr-1.ozone.ru/vod/video-73/01M00NGFHAC4B6913XB17G6R91/preview.mp4';
+
+  it('предлагает полные дорожки от лучшей к худшей', () => {
+    expect(previewSiblings(PREVIEW)).toEqual([
+      'https://vr-1.ozone.ru/vod/video-73/01M00NGFHAC4B6913XB17G6R91/asset_2_h264.mp4',
+      'https://vr-1.ozone.ru/vod/video-73/01M00NGFHAC4B6913XB17G6R91/asset_1_h264.mp4',
+      'https://vr-1.ozone.ru/vod/video-73/01M00NGFHAC4B6913XB17G6R91/asset_0_h264.mp4',
+    ]);
+  });
+
+  it('сохраняет query адреса', () => {
+    const list = previewSiblings(PREVIEW + '?type=review');
+    expect(list[0]).toContain('asset_2_h264.mp4?type=review');
+  });
+
+  it('обычный файл соседей не имеет', () => {
+    expect(previewSiblings('https://site.com/video/clip.mp4')).toEqual([]);
+    expect(previewSiblings('https://site.com/video/preview-2.mp4')).toEqual([]);
+    expect(previewSiblings('https://vr-1.ozone.ru/vod/x/01M0/asset_1_h264.mp4')).toEqual([]);
+  });
+
+  it('битый адрес не роняет разбор', () => {
+    expect(previewSiblings('не адрес')).toEqual([]);
   });
 });

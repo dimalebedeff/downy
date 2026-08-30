@@ -8,7 +8,7 @@ import { applyReorder, isUnfinished, nextToStart, normalizeOrder } from './lib/q
 import { nextSpeed, type SpeedTrack } from './lib/speed';
 import { withCutSuffix } from './lib/cut';
 import { qualityOptions } from './lib/ytdlp-formats';
-import { assetIds, imageStem } from './lib/pick';
+import { assetIds, imageStem, previewSiblings } from './lib/pick';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
 import type {
   CoAppEvent,
@@ -988,6 +988,28 @@ function betterVideo(tabId: number, url: string, known?: MediaItem): MediaItem |
   return (best.size ?? 0) > (known?.size ?? 0) ? best : undefined;
 }
 
+/**
+ * Полная дорожка вместо превью-огрызка. В сеть попадает только то, что
+ * страница проигрывала: у неоткрытого ролика есть лишь `preview.mp4` — десять
+ * секунд без звука. Соседние дорожки лежат по предсказуемому адресу, поэтому
+ * спрашиваем сам CDN, начиная с лучшего качества.
+ */
+async function fullVersionOf(url: string, pageUrl?: string): Promise<string | undefined> {
+  for (const candidate of previewSiblings(url)) {
+    try {
+      // Диапазон в один байт: существование проверяем, файл не тянем
+      const res = await fetch(candidate, {
+        method: 'GET',
+        headers: { Range: 'bytes=0-0', ...(pageUrl ? { Referer: pageUrl } : {}) },
+      });
+      if (res.ok) return candidate;
+    } catch {
+      // Сети нет или CDN отказал — просто пробуем следующего
+    }
+  }
+  return undefined;
+}
+
 async function handlePick(
   tabId: number,
   msg: PickMessage,
@@ -1038,8 +1060,18 @@ async function handlePick(
     if (better) {
       log('page', `вместо превью качаем полный файл: ${better.url.slice(0, 160)}`);
     }
-    const item: MediaItem = better ?? known ?? {
-      url: msg.url,
+    // Полного файла в сети могло не быть вовсе: ролик не проигрывали, и есть
+    // только превью. Спрашиваем CDN про соседей — там ролик целиком и со звуком
+    let url = better?.url ?? msg.url;
+    if (!better) {
+      const full = await fullVersionOf(url, msg.pageUrl);
+      if (full) {
+        log('page', `превью подменили полной дорожкой: ${full.slice(0, 160)}`);
+        url = full;
+      }
+    }
+    const item: MediaItem = better ?? (url === msg.url ? known : undefined) ?? {
+      url,
       kind: 'direct',
       tabId,
       foundAt: Date.now(),

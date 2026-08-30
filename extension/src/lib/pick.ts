@@ -71,3 +71,30 @@ export function assetIds(url: string): string[] {
     .slice(0, -1)
     .filter((p) => p.length >= 16 && /^[A-Za-z0-9._-]+$/.test(p) && /\d/.test(p) && /[A-Za-z]/.test(p));
 }
+
+/** Файл-превью: короткий немой огрызок, который CDN кладёт рядом с роликом */
+const PREVIEW_FILE = /^preview\.[a-z0-9]{2,5}$/i;
+
+/**
+ * Адреса полных дорожек рядом с превью, от лучшей к худшей. Озон отдаёт
+ * галерее `<id>/preview.mp4` — 10 секунд без звука, — а сам ролик лежит
+ * соседом: `<id>/asset_2_h264.mp4` (720p), `asset_1` (540p), `asset_0` (360p).
+ * Если в сеть попало только превью (видео не проигрывали), взять больше неоткуда.
+ */
+export function previewSiblings(url: string): string[] {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return [];
+  }
+  const parts = u.pathname.split('/');
+  const name = parts[parts.length - 1];
+  if (!PREVIEW_FILE.test(name)) return [];
+  return ['asset_2_h264.mp4', 'asset_1_h264.mp4', 'asset_0_h264.mp4'].map((candidate) => {
+    parts[parts.length - 1] = candidate;
+    const sibling = new URL(u.toString());
+    sibling.pathname = parts.join('/');
+    return sibling.toString();
+  });
+}
