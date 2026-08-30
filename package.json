@@ -1,8 +1,8 @@
 {
   "name": "downy",
   "private": true,
-  "version": "0.10.2",
-  "description": "Расширение для скачивания видео и аудио с любых сайтов",
+  "version": "0.11.0",
+  "description": "Расширение для скачивания видео, аудио и картинок с любых сайтов",
   "type": "module",
   "workspaces": [
     "bot"
