@@ -246,20 +246,27 @@ function ui(): ShadowRoot {
   if (shadow) return shadow;
   const host = document.createElement('div');
   host.style.cssText =
-    'all: initial; position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 2147483647; pointer-events: none;';
+    "all: initial; font-family: 'Downy Golos', system-ui, 'Segoe UI', sans-serif;" +
+    ' position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 2147483647; pointer-events: none;';
   shadow = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
   const cyrillic = chrome.runtime.getURL('fonts/golos-cyrillic.woff2');
   const latin = chrome.runtime.getURL('fonts/golos-latin.woff2');
-  style.textContent = [
-    // Golos Text вшит в расширение — тот же шрифт, что в попапе, интернет не нужен
+  // Golos Text вшит в расширение (тот же шрифт, что в попапе — интернет не нужен),
+  // но объявлять его приходится в самом документе: @font-face внутри shadow root
+  // Chrome не применяет, и всё внутри оставалось на системном шрифте
+  const face = document.createElement('style');
+  face.textContent = [
     "@font-face { font-family: 'Downy Golos'; font-weight: 400 900; font-display: swap;",
     `  src: url('${cyrillic}') format('woff2');`,
     '  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }',
     "@font-face { font-family: 'Downy Golos'; font-weight: 400 900; font-display: swap;",
     `  src: url('${latin}') format('woff2');`,
     '  unicode-range: U+0000-00FF, U+2000-206F, U+2212, U+FEFF, U+FFFD; }',
-    ":host { font-family: 'Downy Golos', system-ui, 'Segoe UI', sans-serif; }",
+  ].join('\n');
+  (document.head ?? document.documentElement).append(face);
+
+  style.textContent = [
     '.frame { position: fixed; border: 2px solid #f5c518; border-radius: 6px;',
     '  box-shadow: 0 0 14px rgba(245, 197, 24, .55); pointer-events: none; }',
     '.frame.taken { border-color: #22c55e; box-shadow: 0 0 14px rgba(34, 197, 94, .5); }',
@@ -286,6 +293,7 @@ function ui(): ShadowRoot {
     '.corner { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column;',
     '  align-items: flex-end; gap: 8px; pointer-events: none; max-width: 320px; }',
     '.tt { min-width: 226px; max-width: 300px; border-radius: 12px; overflow: hidden;',
+    "  font-family: 'Downy Golos', system-ui, 'Segoe UI', sans-serif;",
     '  background: #fff; color: #1b1c20; border: 1px solid #e3e4e8;',
     '  box-shadow: 0 6px 22px rgba(15, 17, 22, .2);',
     '  animation: ttIn .2s cubic-bezier(.2, .8, .3, 1) both; }',
