@@ -597,6 +597,8 @@ interface MenuItem {
   aside?: { hint: string; run: () => void };
   /** Ждём разведку: пункт не нажимается, при нём крутится спиннер */
   busy?: boolean;
+  /** Просто сообщение: не нажимается, но и крутиться нечему */
+  note?: boolean;
 }
 
 /** Правая зона пункта, если она есть — иначе обычная строка меню */
@@ -607,15 +609,18 @@ function menuRow(item: MenuItem): HTMLElement {
     run();
   };
 
-  if (item.busy) {
+  if (item.busy || item.note) {
     const btn = document.createElement('button');
     btn.className = 'busy';
     btn.disabled = true;
-    const spin = document.createElement('span');
-    spin.className = 'busy-spin';
+    if (item.busy) {
+      const spin = document.createElement('span');
+      spin.className = 'busy-spin';
+      btn.append(spin);
+    }
     const text = document.createElement('span');
     text.textContent = item.label;
-    btn.append(spin, text);
+    btn.append(text);
     return btn;
   }
 
@@ -868,12 +873,17 @@ async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
   // Есть из чего выбрать — сначала спрашиваем, качаем вторым заходом
   const variants = res?.variants as PickVariant[] | undefined;
   if (variants?.length) {
-    const r = t.el.getBoundingClientRect();
-    showMenu(variants, t, r.left + 12, r.top + 12);
+    showMenu(variants, t, lastMenuAt.x, lastMenuAt.y);
     return;
   }
-  // Ждали качества, а их нет — убираем заглушку, загрузка уже пошла
-  if (opts.wantVariants) closeMenu();
+  // Просили качества, а выбора нет — говорим об этом на месте. Загрузку эта
+  // зона не запускает никогда: качает только сам пункт или конкретное качество
+  if (opts.wantVariants) {
+    openMenu(lastMenuAt.x, lastMenuAt.y, [
+      { label: 'Другого качества нет', run: () => undefined, note: true },
+    ]);
+    window.setTimeout(closeMenu, 1600);
+  }
   if (res?.ok) markTaken(sentUrl ?? t.postUrl);
 }
 

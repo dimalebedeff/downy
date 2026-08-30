@@ -1095,6 +1095,10 @@ async function handlePick(
     if (!picked) {
       const variants = pickVariants(known);
       if (variants.length) return { ok: true, variants };
+      if (msg.wantVariants) {
+        log('page', 'выбирать не из чего — у файла одно качество');
+        return { ok: true, variants: [] };
+      }
     }
     // Под курсором мог играть немой огрызок — ищем настоящий файл по содержимому
     const real = await resolveRealFile(tabId, msg.url, msg.pageUrl);
@@ -1146,6 +1150,10 @@ async function handlePick(
     }
     const variants = pickVariants(undefined, pageUrl);
     if (variants.length) return { ok: true, variants };
+    if (msg.wantVariants) {
+      log('page', 'выбирать не из чего — качества не нашлись');
+      return { ok: true, variants: [] };
+    }
   }
   log(
     'page',
