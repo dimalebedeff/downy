@@ -178,8 +178,8 @@ export interface ThumbRequest {
  *  «клик в попапе → фон → хост → yt-dlp» читалась одним файлом по порядку. */
 export interface LogRequest {
   type: 'log';
-  /** Откуда прилетело: popup или фоновый скрипт */
-  source: 'popup' | 'bg';
+  /** Откуда прилетело: попап, фоновый скрипт или прицел на странице */
+  source: 'popup' | 'bg' | 'page';
   message: string;
 }
 

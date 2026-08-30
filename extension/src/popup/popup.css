@@ -124,6 +124,10 @@ h2 {
   cursor: pointer;
 }
 .icon-btn:hover { background: var(--chip); color: var(--fg); }
+/* Прицел и шестерёнка держатся вместе справа: заголовок в шапке центрован
+   абсолютом, и лишний flex-элемент растащил бы их по краям */
+.head-actions { display: flex; align-items: center; gap: 2px; }
+.icon-btn.on { background: var(--accent); color: var(--accent-ink); }
 
 /* ---------- Баннер статуса и настройки ---------- */
 

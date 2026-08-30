@@ -7,6 +7,8 @@ import { isNewerVersion, REPO } from './lib/update';
 import { applyReorder, isUnfinished, nextToStart, normalizeOrder } from './lib/queue';
 import { nextSpeed, type SpeedTrack } from './lib/speed';
 import { withCutSuffix } from './lib/cut';
+import { qualityOptions } from './lib/ytdlp-formats';
+import { imageStem } from './lib/pick';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
 import type {
   CoAppEvent,
@@ -562,7 +564,7 @@ function broadcastJobs(): void {
 
 /** Событие расширения в общий coapp.log. Порт намеренно не поднимаем: логи —
  *  не повод будить хост, а без хоста всё равно ничего не качается. */
-function log(source: 'popup' | 'bg', message: string): void {
+function log(source: 'popup' | 'bg' | 'page', message: string): void {
   if (!coappPort) return;
   try {
     coappPort.postMessage({ type: 'log', source, message });
@@ -857,6 +859,159 @@ function broadcastUpdateProgress(state: string, message?: string): void {
 
 // ---------- Сообщения от попапа и content script ----------
 
+// ---------- Прицел: медиа выбирают кликом на самой странице ----------
+
+/** Вкладки с включённым прицелом и счётчик взятого — для плашки на странице */
+const pickCounts = new Map<number, number>();
+
+interface PickVariant {
+  label: string;
+  url?: string;
+  streams?: StreamSelection;
+}
+
+interface PickMessage {
+  kind: 'image' | 'video';
+  url?: string;
+  postUrl?: string;
+  variantUrl?: string;
+  /** Подпись выбранного качества — уезжает в имя файла */
+  variantLabel?: string;
+  streams?: StreamSelection;
+  pageUrl?: string;
+  pageTitle?: string;
+}
+
+function tellFrames(tabId: number, msg: unknown): void {
+  // Прицел живёт во всех фреймах — сообщение уходит каждому
+  void chrome.tabs.sendMessage(tabId, msg).catch(() => {});
+}
+
+function setPicker(tabId: number, on: boolean): void {
+  if (on) pickCounts.set(tabId, 0);
+  else pickCounts.delete(tabId);
+  log('bg', `прицел ${on ? 'включён' : 'выключен'}, вкладка ${tabId}`);
+  tellFrames(tabId, { type: 'picker', on });
+}
+
+function bumpPicked(tabId: number): void {
+  if (!pickCounts.has(tabId)) return;
+  const count = (pickCounts.get(tabId) ?? 0) + 1;
+  pickCounts.set(tabId, count);
+  tellFrames(tabId, { type: 'picker-count', count });
+}
+
+/** Качества для меню на странице. Пусто — выбирать не из чего, качаем сразу. */
+function pickVariants(item: MediaItem | undefined, pageUrl?: string): PickVariant[] {
+  if (item?.variants && item.variants.length > 1) {
+    const list: PickVariant[] = item.variants.map((v) => ({ label: v.label, url: v.url }));
+    list.push({ label: 'Только звук', streams: 'audio' });
+    return list;
+  }
+  // Разведка страницы уже съездила — предлагаем её форматы
+  const probed = pageUrl ? probeCache.get(pageUrl) : undefined;
+  if (probed?.status === 'ready') {
+    const opts = qualityOptions(probed.formats);
+    if (opts.length > 1) {
+      const list: PickVariant[] = opts.map((q) => ({ label: q.label, url: String(q.maxHeight) }));
+      list.push({ label: 'Только звук', streams: 'audio' });
+      return list;
+    }
+  }
+  return [];
+}
+
+async function handlePick(
+  tabId: number,
+  msg: PickMessage,
+): Promise<{ ok: boolean; error?: string; variants?: PickVariant[] }> {
+  const streams = msg.streams ?? 'both';
+  const picked = msg.variantUrl != null || msg.streams != null;
+
+  if (msg.kind === 'image') {
+    if (!msg.url) return { ok: false, error: 'У картинки нет адреса' };
+    log('page', `взяли картинку ${msg.url.slice(0, 160)}`);
+    const item: MediaItem = {
+      url: msg.url,
+      kind: 'direct',
+      tabId,
+      foundAt: Date.now(),
+      contentType: 'image/jpeg',
+      pageUrl: msg.pageUrl,
+      pageTitle: imageStem(msg.url, msg.pageTitle),
+    };
+    const res = await startDirectJob(item, 'both');
+    if (res.ok) bumpPicked(tabId);
+    return res;
+  }
+
+  // Видео с прямым адресом: он уже пойман по сети, оттуда варианты и размер
+  if (msg.url) {
+    const known = tabMedia.get(tabId)?.get(msg.url);
+    if (!picked) {
+      const variants = pickVariants(known);
+      if (variants.length) return { ok: true, variants };
+    }
+    const item: MediaItem = known ?? {
+      url: msg.url,
+      kind: 'direct',
+      tabId,
+      foundAt: Date.now(),
+      pageUrl: msg.pageUrl,
+      pageTitle: msg.pageTitle,
+    };
+    log('page', `взяли видео ${item.kind} streams=${streams} ${msg.url.slice(0, 160)}`);
+    const res =
+      item.kind === 'direct'
+        ? await startDirectJob(item, streams)
+        : await startHlsJob(item, msg.variantUrl, msg.variantLabel, streams);
+    if (res.ok) bumpPicked(tabId);
+    return res;
+  }
+
+  // MSE: потока с адресом нет, качаем страницу поста через yt-dlp
+  const pageUrl = msg.postUrl ?? msg.pageUrl;
+  if (!pageUrl) return { ok: false, error: 'Не удалось понять, что это за видео' };
+  if (!picked) {
+    const variants = pickVariants(undefined, pageUrl);
+    if (variants.length) return { ok: true, variants };
+  }
+  log('page', `взяли видео через yt-dlp streams=${streams} ${pageUrl.slice(0, 160)}`);
+  // У yt-dlp вариант приходит высотой кадра, а не адресом
+  const maxHeight = msg.variantUrl ? Number(msg.variantUrl) : undefined;
+  // В имя файла идёт «1080p60» — без веса, который висит в подписи меню
+  const qualityLabel = msg.variantLabel?.split(' · ')[0];
+  const res = await startYtdlpJob(pageUrl, msg.pageTitle, streams, maxHeight, qualityLabel);
+  if (res.ok) bumpPicked(tabId);
+  return res;
+}
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== 'toggle-picker') return;
+  void (async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id != null) setPicker(tab.id, !pickCounts.has(tab.id));
+  })();
+});
+
+// Запасной путь для картинок — там, где правый клик сайтом не перехвачен
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create(
+    { id: 'downy-image', title: 'Скачать картинку через Downy', contexts: ['image'] },
+    () => void chrome.runtime.lastError,
+  );
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== 'downy-image' || !info.srcUrl || tab?.id == null) return;
+  void handlePick(tab.id, {
+    kind: 'image',
+    url: info.srcUrl,
+    pageUrl: info.pageUrl,
+    pageTitle: tab.title,
+  });
+});
+
 interface Message {
   type: string;
   [key: string]: unknown;
@@ -945,6 +1100,27 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         }
         tabRemoved.set(tabId, removed);
         persist();
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'pick': {
+        const tabId = sender.tab?.id ?? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+        if (tabId == null) {
+          sendResponse({ ok: false, error: 'Не понял, с какой вкладки' });
+          break;
+        }
+        sendResponse(await handlePick(tabId, msg as unknown as PickMessage));
+        break;
+      }
+      case 'picker-off': {
+        const tabId = sender.tab?.id;
+        if (tabId != null) setPicker(tabId, false);
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'toggle-picker': {
+        const tabId = msg.tabId as number | undefined;
+        if (tabId != null) setPicker(tabId, !pickCounts.has(tabId));
         sendResponse({ ok: true });
         break;
       }

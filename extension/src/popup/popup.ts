@@ -1083,6 +1083,21 @@ async function init(): Promise<void> {
     settingsPanel.hidden = !settingsPanel.hidden;
   });
 
+  const pickBtn = $<HTMLButtonElement>('#pick-btn');
+  // Сочетание пользователь мог переназначить в chrome://extensions/shortcuts —
+  // спрашиваем настоящее, а не то, что предложили в манифесте
+  const shortcut = (await chrome.commands.getAll()).find((c) => c.name === 'toggle-picker')?.shortcut;
+  pickBtn.title = shortcut
+    ? `Выбрать на странице (${shortcut}) — тыкай в видео и картинки, ESC — выход`
+    : 'Выбрать на странице — тыкай в видео и картинки, ESC — выход';
+  pickBtn.addEventListener('click', () => {
+    if (activeTab?.id == null) return;
+    log('включаем прицел на странице');
+    void chrome.runtime.sendMessage({ type: 'toggle-picker', tabId: activeTab.id });
+    // Попап всё равно закроется от первого же клика по странице
+    window.close();
+  });
+
   ytdlpBtn.addEventListener('click', async (e) => {
     const btn = e.currentTarget as HTMLButtonElement;
     btn.disabled = true;
