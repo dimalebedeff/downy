@@ -195,6 +195,18 @@ interface PickVariant {
   label: string;
   url?: string;
   streams?: string;
+  /** Вариант может увести на другой тип: с обложки — на сам ролик */
+  kind?: 'image' | 'video';
+}
+
+interface SendOpts {
+  url?: string;
+  variantUrl?: string;
+  variantLabel?: string;
+  streams?: string;
+  kind?: 'image' | 'video';
+  /** Человек выбрал в меню — второй раз спрашивать нечего */
+  chosen?: boolean;
 }
 
 
@@ -296,39 +308,73 @@ function hits(el: Element, x: number, y: number): boolean {
   return r.width > 0 && r.height > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }
 
-/** Что под курсором. Плееры и галереи накрывают медиа прозрачным слоем —
- *  elementFromPoint отдаёт этот слой, поэтому на каждом шаге вверх заглядываем
- *  и внутрь контейнера: берём то видео или картинку, на которых курсор стоит. */
-function pickAt(x: number, y: number): PickTarget | null {
+/** Цепочка от точки вверх: сам элемент под курсором и его предки */
+function chainAt(x: number, y: number): Element[] {
+  const chain: Element[] = [];
   let node: Element | null = document.elementFromPoint(x, y);
-  for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
-    if (node instanceof HTMLVideoElement) return videoTarget(node);
-    if (node instanceof HTMLImageElement && bigEnough(node)) {
-      const url = bestImageUrl(node);
-      if (url) return { el: node, kind: 'image', url };
-    }
+  for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) chain.push(node);
+  return chain;
+}
 
-    // Видео под накрывающим слоем важнее картинки: превью часто лежит рядом
+/** Видео ищем первым проходом по всей цепочке. Плееры кладут поверх ролика
+ *  постер и слой-ловушку кликов, поэтому одного elementFromPoint мало: на
+ *  каждом уровне заглядываем внутрь и берём видео, на котором стоит курсор. */
+function videoAt(x: number, y: number): PickTarget | null {
+  for (const node of chainAt(x, y)) {
+    if (node instanceof HTMLVideoElement) return videoTarget(node);
     for (const inner of node.querySelectorAll('video')) {
       if (hits(inner, x, y)) return videoTarget(inner);
-    }
-    for (const inner of node.querySelectorAll('img')) {
-      if (!hits(inner, x, y) || !bigEnough(inner)) continue;
-      const url = bestImageUrl(inner);
-      if (url) return { el: inner, kind: 'image', url };
-    }
-
-    if (bigEnough(node)) {
-      const url = backgroundUrl(node);
-      if (url) return { el: node, kind: 'image', url };
     }
   }
   return null;
 }
 
+function imageAt(x: number, y: number): PickTarget | null {
+  for (const node of chainAt(x, y)) {
+    if (node instanceof HTMLImageElement && bigEnough(node)) {
+      const url = bestImageUrl(node);
+      if (url) return imageTarget(node, url);
+    }
+    for (const inner of node.querySelectorAll('img')) {
+      if (!hits(inner, x, y) || !bigEnough(inner)) continue;
+      const url = bestImageUrl(inner);
+      if (url) return imageTarget(inner, url);
+    }
+    if (bigEnough(node)) {
+      const url = backgroundUrl(node);
+      if (url) return imageTarget(node, url);
+    }
+  }
+  return null;
+}
+
+/** Превью ролика — тоже картинка, но за ней обычно стоит ссылка на страницу
+ *  ролика. Держим её при себе: спросим, что человек имел в виду. */
+function imageTarget(el: Element, url: string): PickTarget {
+  const href = el.closest('a')?.href;
+  const post = href ? absUrl(href) : null;
+  return {
+    el,
+    kind: 'image',
+    url,
+    postUrl: post && POST_LINK.test(post) ? post : undefined,
+  };
+}
+
+/** Видео важнее картинки: под курсором на плеере лежит и постер, и ролик */
+function pickAt(x: number, y: number): PickTarget | null {
+  return videoAt(x, y) ?? imageAt(x, y);
+}
+
 function frameLabel(t: PickTarget): string {
   if (takenEls.has(t.el)) return '✓ уже взято';
-  if (t.kind === 'image') return 'картинка';
+  if (t.kind === 'image') {
+    // Настоящий размер файла, а не растянутый на экране: сразу видно, что
+    // под курсором мелкая обложка, а не полноразмерный снимок
+    const img = t.el instanceof HTMLImageElement ? t.el : null;
+    const size = img?.naturalWidth ? ` ${img.naturalWidth}×${img.naturalHeight}` : '';
+    return t.postUrl ? `картинка${size} — или ролик` : `картинка${size}`;
+  }
   return t.url ? 'видео' : 'видео — через yt-dlp';
 }
 
@@ -378,25 +424,58 @@ function closeMenu(): void {
   menuEl = null;
 }
 
-/** Меню появляется только там, где есть из чего выбирать — у видео с качествами */
-function showMenu(variants: PickVariant[], t: PickTarget, x: number, y: number): void {
+/** Меню у курсора. Появляется только там, где есть из чего выбирать */
+function openMenu(x: number, y: number, items: { label: string; run: () => void }[]): void {
   closeMenu();
   const root = ui();
   menuEl = document.createElement('div');
   menuEl.className = 'menu';
   menuEl.style.left = `${Math.max(4, Math.min(x, window.innerWidth - 190))}px`;
-  menuEl.style.top = `${Math.max(4, Math.min(y, window.innerHeight - 24 - variants.length * 30))}px`;
-  for (const v of variants) {
+  menuEl.style.top = `${Math.max(4, Math.min(y, window.innerHeight - 24 - items.length * 30))}px`;
+  for (const item of items) {
     const btn = document.createElement('button');
-    btn.textContent = v.label;
+    btn.textContent = item.label;
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       closeMenu();
-      void send(t, v.url, v.streams, v.url ? v.label : undefined);
+      item.run();
     });
     menuEl.append(btn);
   }
   root.append(menuEl);
+}
+
+/** Качества видео — их присылает фон, когда вариантов больше одного */
+function showMenu(variants: PickVariant[], t: PickTarget, x: number, y: number): void {
+  openMenu(
+    x,
+    y,
+    variants.map((v) => ({
+      label: v.label,
+      run: () =>
+        void send(t, {
+          // Вариант с собственным типом ведёт на другой файл (ролик вместо
+          // обложки), качества же уточняют ту же загрузку
+          ...(v.kind ? { kind: v.kind, url: v.url } : { variantUrl: v.url, variantLabel: v.url ? v.label : undefined }),
+          streams: v.streams,
+          chosen: true,
+        }),
+    })),
+  );
+}
+
+/** Под курсором превью ролика: и картинка, и ссылка на видео — спрашиваем */
+function showChoice(t: PickTarget, x: number, y: number): void {
+  openMenu(x, y, [
+    {
+      label: 'Скачать ролик',
+      run: () => void send({ el: t.el, kind: 'video', postUrl: t.postUrl }, { chosen: true }),
+    },
+    {
+      label: 'Скачать картинку',
+      run: () => void send({ el: t.el, kind: 'image', url: t.url }, { chosen: true }),
+    },
+  ]);
 }
 
 function markTaken(t: PickTarget): void {
@@ -404,20 +483,16 @@ function markTaken(t: PickTarget): void {
   if (hovered?.el === t.el) drawFrame(t);
 }
 
-async function send(
-  t: PickTarget,
-  variantUrl?: string,
-  streams?: string,
-  variantLabel?: string,
-): Promise<void> {
+async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
   const res = await chrome.runtime.sendMessage({
     type: 'pick',
-    kind: t.kind,
-    url: t.url,
+    kind: opts.kind ?? t.kind,
+    url: opts.url ?? t.url,
     postUrl: t.postUrl,
-    variantUrl,
-    variantLabel,
-    streams,
+    variantUrl: opts.variantUrl,
+    variantLabel: opts.variantLabel,
+    streams: opts.streams,
+    chosen: opts.chosen,
     pageUrl: location.href,
     pageTitle: document.title,
   });
@@ -491,6 +566,12 @@ document.addEventListener(
       return;
     }
     hovered = t;
+    // Превью ролика: картинка под курсором, а ссылка ведёт на видео —
+    // угадывать за человека нечего, спрашиваем
+    if (t.kind === 'image' && t.postUrl) {
+      showChoice(t, e.clientX, e.clientY);
+      return;
+    }
     void send(t);
   },
   true,

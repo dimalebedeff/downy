@@ -8,7 +8,7 @@ import { applyReorder, isUnfinished, nextToStart, normalizeOrder } from './lib/q
 import { nextSpeed, type SpeedTrack } from './lib/speed';
 import { withCutSuffix } from './lib/cut';
 import { qualityOptions } from './lib/ytdlp-formats';
-import { imageStem } from './lib/pick';
+import { assetIds, imageStem } from './lib/pick';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
 import type {
   CoAppEvent,
@@ -869,6 +869,8 @@ interface PickVariant {
   label: string;
   url?: string;
   streams?: StreamSelection;
+  /** Вариант уводит на другой тип: с обложки — на сам ролик */
+  kind?: 'image' | 'video';
 }
 
 interface PickMessage {
@@ -879,6 +881,8 @@ interface PickMessage {
   /** Подпись выбранного качества — уезжает в имя файла */
   variantLabel?: string;
   streams?: StreamSelection;
+  /** Выбор уже сделан в меню на странице — спрашивать второй раз нечего */
+  chosen?: boolean;
   pageUrl?: string;
   pageTitle?: string;
 }
@@ -922,15 +926,39 @@ function pickVariants(item: MediaItem | undefined, pageUrl?: string): PickVarian
   return [];
 }
 
+/** Видео этой вкладки, лежащее у CDN под тем же идентификатором, что картинка */
+function relatedVideo(tabId: number, imageUrl: string): MediaItem | undefined {
+  const ids = assetIds(imageUrl);
+  if (ids.length === 0) return undefined;
+  for (const item of tabMedia.get(tabId)?.values() ?? []) {
+    if (ids.some((id) => item.url.includes(id))) return item;
+  }
+  return undefined;
+}
+
 async function handlePick(
   tabId: number,
   msg: PickMessage,
 ): Promise<{ ok: boolean; error?: string; variants?: PickVariant[] }> {
   const streams = msg.streams ?? 'both';
-  const picked = msg.variantUrl != null || msg.streams != null;
+  const picked = msg.chosen === true || msg.variantUrl != null || msg.streams != null;
 
   if (msg.kind === 'image') {
     if (!msg.url) return { ok: false, error: 'У картинки нет адреса' };
+    // Обложка ролика лежит у CDN по соседству с самим роликом под общим
+    // идентификатором. Нашли пару — спрашиваем, что человеку нужно
+    if (!picked) {
+      const video = relatedVideo(tabId, msg.url);
+      if (video) {
+        return {
+          ok: true,
+          variants: [
+            { label: 'Скачать ролик', kind: 'video', url: video.url },
+            { label: 'Скачать картинку', kind: 'image', url: msg.url },
+          ],
+        };
+      }
+    }
     log('page', `взяли картинку ${msg.url.slice(0, 160)}`);
     const item: MediaItem = {
       url: msg.url,

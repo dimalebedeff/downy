@@ -50,3 +50,22 @@ export function imageStem(url: string, fallback?: string): string | undefined {
   // Короткий или безликий сегмент ничего не объясняет — лучше заголовок страницы
   return stem.length > 2 && !/^(index|image|img|photo|default)$/i.test(stem) ? stem : fallback;
 }
+
+/**
+ * Длинные идентификаторы ассета из пути. CDN кладут обложку и сам ролик по
+ * соседству под общим ключом (ozon: /video-72/<ULID>/cover/wc100/cover.jpg и
+ * /video-72/<ULID>/asset_1_h264.mp4), поэтому по превью можно дотянуться до
+ * видео. Берём только сегменты, которые тянут на идентификатор: длинные и
+ * смешанные из букв с цифрами — обычные слова пути так не выглядят.
+ */
+export function assetIds(url: string): string[] {
+  let parts: string[];
+  try {
+    parts = new URL(url).pathname.split('/').filter(Boolean);
+  } catch {
+    return [];
+  }
+  return parts.filter(
+    (p) => p.length >= 16 && /^[A-Za-z0-9._-]+$/.test(p) && /\d/.test(p) && /[A-Za-z]/.test(p),
+  );
+}

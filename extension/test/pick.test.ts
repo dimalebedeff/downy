@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bestFromSrcset, imageStem } from '../src/lib/pick';
+import { assetIds, bestFromSrcset, imageStem } from '../src/lib/pick';
 
 describe('bestFromSrcset', () => {
   it('берёт самую большую ширину, а не последнюю запись', () => {
@@ -67,5 +67,34 @@ describe('imageStem', () => {
   it('битый адрес отдаёт запасной вариант', () => {
     expect(imageStem('не адрес вовсе', 'Запасной')).toBe('Запасной');
     expect(imageStem('не адрес вовсе')).toBeUndefined();
+  });
+});
+
+describe('assetIds', () => {
+  it('находит идентификатор ролика в пути обложки', () => {
+    const ids = assetIds('https://ir.ozone.ru/s3/video-72/01M150ZCBMS472FSXW9NC9QH47/cover/wc100/cover.jpg');
+    expect(ids).toContain('01M150ZCBMS472FSXW9NC9QH47');
+  });
+
+  it('тот же идентификатор виден и в адресе самого видео', () => {
+    const cover = assetIds('https://ir.ozone.ru/s3/video-72/01M150ZCBMS472FSXW9NC9QH47/cover/wc100/cover.jpg');
+    const video = 'https://vr-1.ozone.ru/vod/video-72/01M150ZCBMS472FSXW9NC9QH47/asset_1_h264.mp4';
+    expect(cover.some((id) => video.includes(id))).toBe(true);
+  });
+
+  it('обычные слова пути за идентификатор не сходят', () => {
+    expect(assetIds('https://site.com/images/photos/summer/beach.jpg')).toEqual([]);
+  });
+
+  it('длинное слово без цифр не идентификатор', () => {
+    expect(assetIds('https://site.com/verylongdirectoryname/pic.jpg')).toEqual([]);
+  });
+
+  it('короткие сегменты с цифрами не в счёт', () => {
+    expect(assetIds('https://site.com/v2/img7/pic.jpg')).toEqual([]);
+  });
+
+  it('битый адрес не роняет разбор', () => {
+    expect(assetIds('не адрес')).toEqual([]);
   });
 });
