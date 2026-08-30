@@ -98,3 +98,18 @@ describe('assetIds', () => {
     expect(assetIds('не адрес')).toEqual([]);
   });
 });
+
+describe('assetIds: имя файла не идентификатор', () => {
+  it('одинаковые имена файлов у разных роликов не дают общего ключа', () => {
+    const a = assetIds('https://cdn.site/vod/video-71/01M026/asset_1_h264.mp4');
+    const b = assetIds('https://cdn.site/vod/video-72/01KZXM/asset_1_h264.mp4');
+    expect(a.some((id) => b.includes(id))).toBe(false);
+  });
+
+  it('полный ролик и его превью делят идентификатор каталога', () => {
+    const full = assetIds('https://vr-1.ozone.ru/vod/video-71/01M026G6STB3E8TQXRQ8J0MS2W/asset_1_h264.mp4');
+    const prev = assetIds('https://vr-1.ozone.ru/vod/video-71/01M026G6STB3E8TQXRQ8J0MS2W/preview.mp4');
+    expect(full).toEqual(['01M026G6STB3E8TQXRQ8J0MS2W']);
+    expect(prev).toEqual(full);
+  });
+});

@@ -208,3 +208,32 @@ describe('дубли одного файла с разных префиксов 
     expect(groups).toHaveLength(2);
   });
 });
+
+describe('немое превью и полный ролик — один пункт', () => {
+  const at = (url: string, size?: number): MediaItem => ({
+    url,
+    kind: 'direct',
+    tabId: 1,
+    foundAt: 1,
+    contentType: 'video/mp4',
+    size,
+  });
+
+  it('preview.mp4 не отдельная карточка, а вариант того же ролика', () => {
+    const groups = groupMediaItems([
+      at('https://vr-1.ozone.ru/vod/video-71/01M026G6STB3E8TQXRQ8J0MS2W/preview.mp4', 1_268_000),
+      at('https://vr-1.ozone.ru/vod/video-71/01M026G6STB3E8TQXRQ8J0MS2W/asset_1_h264.mp4', 2_648_760),
+    ]);
+    expect(groups).toHaveLength(1);
+    // Показываем и качаем полный файл — в превью нет звука
+    expect(groups[0].primary.url).toContain('asset_1_h264.mp4');
+  });
+
+  it('превью двух разных роликов не сливаются', () => {
+    const groups = groupMediaItems([
+      at('https://vr-1.ozone.ru/vod/video-71/01M026G6STB3E8TQXRQ8J0MS2W/preview.mp4', 1_000_000),
+      at('https://vr-1.ozone.ru/vod/video-72/01KZXMSN8XRFEP80G6W1FSTMFY/preview.mp4', 1_000_000),
+    ]);
+    expect(groups).toHaveLength(2);
+  });
+});

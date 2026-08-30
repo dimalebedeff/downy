@@ -65,7 +65,9 @@ export function assetIds(url: string): string[] {
   } catch {
     return [];
   }
-  return parts.filter(
-    (p) => p.length >= 16 && /^[A-Za-z0-9._-]+$/.test(p) && /\d/.test(p) && /[A-Za-z]/.test(p),
-  );
+  // Последний сегмент — имя файла: «asset_1_h264.mp4» подходит под все приметы
+  // идентификатора, но у соседних роликов оно как раз совпадает
+  return parts
+    .slice(0, -1)
+    .filter((p) => p.length >= 16 && /^[A-Za-z0-9._-]+$/.test(p) && /\d/.test(p) && /[A-Za-z]/.test(p));
 }

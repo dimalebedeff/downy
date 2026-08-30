@@ -3,6 +3,7 @@
 
 import type { MediaItem } from './types';
 import { isProbablyVideo } from './media-detect';
+import { assetIds } from './pick';
 
 /**
  * Параметры, которыми сайты нарезают один файл на куски (range-запросы через
@@ -106,6 +107,11 @@ function pathTail(pathname: string): string {
 function groupKey(item: MediaItem): string {
   try {
     const u = new URL(item.url);
+    // Идентификатор ассета вернее любого пути: один ролик отдают и полным
+    // файлом, и немым превью в соседнем каталоге (ozon: <id>/asset_1_h264.mp4
+    // и <id>/preview.mp4). Это один пункт списка, а не два
+    const ids = assetIds(item.url);
+    if (ids.length > 0) return `${mediaClass(item)}|${u.host}|${ids.join('/')}`;
     return `${mediaClass(item)}|${u.host}|${pathTail(u.pathname)}`;
   } catch {
     return `${mediaClass(item)}|${item.url}`;

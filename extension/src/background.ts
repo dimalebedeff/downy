@@ -935,14 +935,32 @@ function pickVariants(item: MediaItem | undefined, pageUrl?: string): PickVarian
   return [];
 }
 
-/** Видео этой вкладки, лежащее у CDN под тем же идентификатором, что картинка */
-function relatedVideo(tabId: number, imageUrl: string): MediaItem | undefined {
-  const ids = assetIds(imageUrl);
-  if (ids.length === 0) return undefined;
+/** Все файлы вкладки, лежащие у CDN под тем же идентификатором ассета */
+function relatives(tabId: number, url: string): MediaItem[] {
+  const ids = assetIds(url);
+  if (ids.length === 0) return [];
+  const out: MediaItem[] = [];
   for (const item of tabMedia.get(tabId)?.values() ?? []) {
-    if (ids.some((id) => item.url.includes(id))) return item;
+    if (ids.some((id) => item.url.includes(id))) out.push(item);
   }
-  return undefined;
+  // Самый весомый впереди: у превью и вес меньше, и звука нет
+  return out.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+}
+
+/** Видео этой вкладки, лежащее под тем же идентификатором, что картинка */
+function relatedVideo(tabId: number, imageUrl: string): MediaItem | undefined {
+  return relatives(tabId, imageUrl).find((it) => it.url !== imageUrl);
+}
+
+/**
+ * Полноценный ролик вместо того, что играет в плеере. Озон (и не он один)
+ * крутит на странице немое превью в низком разрешении, а файл со звуком лежит
+ * рядом под тем же идентификатором — скачивать надо его.
+ */
+function betterVideo(tabId: number, url: string, known?: MediaItem): MediaItem | undefined {
+  const best = relatives(tabId, url)[0];
+  if (!best || best.url === url) return undefined;
+  return (best.size ?? 0) > (known?.size ?? 0) ? best : undefined;
 }
 
 async function handlePick(
@@ -990,7 +1008,12 @@ async function handlePick(
       const variants = pickVariants(known);
       if (variants.length) return { ok: true, variants };
     }
-    const item: MediaItem = known ?? {
+    // Плеер мог играть немое превью — берём полный файл того же ролика
+    const better = picked ? undefined : betterVideo(tabId, msg.url, known);
+    if (better) {
+      log('page', `вместо превью качаем полный файл: ${better.url.slice(0, 160)}`);
+    }
+    const item: MediaItem = better ?? known ?? {
       url: msg.url,
       kind: 'direct',
       tabId,
