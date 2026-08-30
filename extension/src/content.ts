@@ -740,8 +740,10 @@ const ICON_KINDS = new Set<FileKind>(['video', 'image', 'audio', 'other']);
 
 /** Дольше этого — результат стоит подержать: человек уже забыл, что качал */
 const DONE_LONG_MS = 10_000;
-/** Сколько на экране живёт строка «скачано N» после последней загрузки */
-const ROLLUP_MS = 6000;
+/** Сколько на экране живёт строка «скачано N» после последней загрузки.
+ *  Шести секунд хватало, чтобы блок начал мозолить глаза: имя файла человек
+ *  уже видел, а итог читается за мгновение */
+const ROLLUP_MS = 2500;
 
 interface Row {
   node: HTMLDivElement;
@@ -973,7 +975,7 @@ function updateJob(job: PageJob): void {
     doneCount++;
     doneBytes += job.bytes ?? 0;
     // Быстрая загрузка сама себе уведомление о старте: показали и убрали
-    dropRow(job.jobId, Date.now() - row.startedAt < DONE_LONG_MS ? 900 : 4000);
+    dropRow(job.jobId, Date.now() - row.startedAt < DONE_LONG_MS ? 900 : 2000);
   } else {
     row.fill.style.width = '0%';
     row.state.className = 'p-state err';
