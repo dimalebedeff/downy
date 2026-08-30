@@ -942,7 +942,12 @@ let moveScheduled = false;
 document.addEventListener(
   'mousemove',
   (e) => {
-    if (!pickerOn || menuEl || moveScheduled) return;
+    if (!pickerOn || menuEl) return;
+    // Состояние Alt берём из самого события: оно доедет и без фокуса в документе
+    const alt = e.altKey;
+    const altChanged = alt !== greedy;
+    greedy = alt;
+    if (moveScheduled && !altChanged) return;
     moveScheduled = true;
     const { clientX, clientY } = e;
     requestAnimationFrame(() => {
@@ -950,8 +955,9 @@ document.addEventListener(
       if (!pickerOn || menuEl) return;
       lastPoint = { x: clientX, y: clientY };
       const t = pickAt(clientX, clientY);
-      // Тот же элемент — рамка уже на месте, лишний раз не дёргаем
-      if (t?.el === hovered?.el) return;
+      // Тот же элемент — рамка уже на месте, лишний раз не дёргаем.
+      // Alt мог поменять саму добычу, тогда перерисовываем в любом случае
+      if (!altChanged && t?.el === hovered?.el) return;
       hovered = t;
       drawFrame(t);
     });
@@ -1005,6 +1011,22 @@ for (const type of ['keydown', 'keyup'] as const) {
       const next = (e as KeyboardEvent).altKey;
       if (next === greedy) return;
       greedy = next;
+      refreshHover();
+    },
+    true,
+  );
+}
+
+// Alt мог быть зажат ещё до входа в прицел или нажат вне документа —
+// сверяемся при любом касании мыши, там состояние клавиш всегда актуально
+for (const type of ['mouseover', 'mousedown', 'wheel'] as const) {
+  document.addEventListener(
+    type,
+    (e) => {
+      if (!pickerOn || menuEl) return;
+      const alt = (e as MouseEvent).altKey;
+      if (alt === greedy) return;
+      greedy = alt;
       refreshHover();
     },
     true,
