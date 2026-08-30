@@ -1316,6 +1316,16 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         sendResponse(await handlePick(tabId, msg as unknown as PickMessage));
         break;
       }
+      case 'known-variants': {
+        // Что известно про качества прямо сейчас, без разведки: подпись в меню
+        // должна появляться мгновенно, а не через несколько секунд
+        const tabId = sender.tab?.id;
+        const url = msg.url as string | undefined;
+        const pageUrl = msg.pageUrl as string | undefined;
+        const known = tabId != null && url ? tabMedia.get(tabId)?.get(url) : undefined;
+        sendResponse({ variants: pickVariants(known, pageUrl) });
+        break;
+      }
       case 'picker-off': {
         const tabId = sender.tab?.id;
         if (tabId != null) setPicker(tabId, false, 'со страницы');

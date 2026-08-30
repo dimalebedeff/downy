@@ -304,6 +304,16 @@ function ui(): ShadowRoot {
     '.menu { position: fixed; min-width: 168px; padding: 4px; border: 1px solid #e3e4e8;',
     '  border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(20, 20, 25, .18);',
     "  font: 400 13px/1.4 'Downy Golos', system-ui, sans-serif; pointer-events: auto; }",
+    /* Пункт с двумя зонами: слева действие, справа — что именно скачается */
+    '.split { display: flex; align-items: stretch; border-radius: 6px; overflow: hidden; }',
+    '.split:hover { background: #ececef; }',
+    '.split .main { flex: 1; min-width: 0; padding: 6px 10px; border: none; background: none;',
+    '  font: inherit; text-align: left; cursor: pointer; color: #1b1c20; }',
+    '.split .more { flex: none; display: inline-flex; align-items: center; gap: 4px;',
+    '  padding: 0 8px; border: none; border-left: 1px solid #d9dade; background: #f0f0f2;',
+    "  color: #1b1c20; font: 600 11px/1 'Downy Golos', system-ui, sans-serif; cursor: pointer; }",
+    '.split .more:hover { background: #f5c518; color: #1b1c20; }',
+    '.split .more svg { display: block; }',
     '.menu button { display: block; width: 100%; padding: 6px 10px; border: none; border-radius: 6px;',
     '  background: none; color: #1b1c20; font: inherit; text-align: left; cursor: pointer; }',
     '.menu button:hover { background: #ececef; }',
@@ -311,6 +321,10 @@ function ui(): ShadowRoot {
     '  .menu { background: #262a33; border-color: #363b47; }',
     '  .menu button { color: #f2f3f5; }',
     '  .menu button:hover { background: #313642; }',
+    '  .split .main { color: #f2f3f5; }',
+    '  .split:hover { background: #313642; }',
+    '  .split .more { border-left-color: #414857; background: #2f3540; color: #f2f3f5; }',
+    '  .split .more:hover { background: #f5c518; color: #1b1c20; }',
     '}',
     /* Уголок: панель Downy — один объект вместо россыпи карточек */
     '.corner { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column;',
@@ -546,25 +560,67 @@ function closeMenu(): void {
 /** Меню у курсора. Появляется только там, где есть из чего выбирать */
 let lastMenuAt = { x: 0, y: 0 };
 
-function openMenu(x: number, y: number, items: { label: string; run: () => void }[]): void {
+interface MenuItem {
+  label: string;
+  run: () => void;
+  /** Вторая зона справа: подпись (какое качество возьмём) и своё действие */
+  aside?: { hint: string; run: () => void };
+}
+
+/** Правая зона пункта, если она есть — иначе обычная строка меню */
+function menuRow(item: MenuItem): HTMLElement {
+  const fire = (label: string, run: () => void) => {
+    closeMenu();
+    log(`выбрали в меню: ${label}`);
+    run();
+  };
+
+  if (!item.aside) {
+    const btn = document.createElement('button');
+    btn.textContent = item.label;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fire(item.label, item.run);
+    });
+    return btn;
+  }
+
+  const row = document.createElement('div');
+  row.className = 'split';
+  const main = document.createElement('button');
+  main.className = 'main';
+  main.textContent = item.label;
+  main.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fire(item.label, item.run);
+  });
+  const more = document.createElement('button');
+  more.className = 'more';
+  more.title = 'Выбрать качество';
+  more.append(item.aside.hint);
+  more.insertAdjacentHTML(
+    'beforeend',
+    '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+      '<path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.6"' +
+      ' stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  );
+  more.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fire(`${item.label} → выбор качества`, item.aside!.run);
+  });
+  row.append(main, more);
+  return row;
+}
+
+function openMenu(x: number, y: number, items: MenuItem[]): void {
   closeMenu();
   lastMenuAt = { x, y };
   const root = ui();
   menuEl = document.createElement('div');
   menuEl.className = 'menu';
-  menuEl.style.left = `${Math.max(4, Math.min(x, window.innerWidth - 190))}px`;
+  menuEl.style.left = `${Math.max(4, Math.min(x, window.innerWidth - 210))}px`;
   menuEl.style.top = `${Math.max(4, Math.min(y, window.innerHeight - 24 - items.length * 30))}px`;
-  for (const item of items) {
-    const btn = document.createElement('button');
-    btn.textContent = item.label;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeMenu();
-      log(`выбрали в меню: ${item.label}`);
-      item.run();
-    });
-    menuEl.append(btn);
-  }
+  for (const item of items) menuEl.append(menuRow(item));
   root.append(menuEl);
   log(`меню: ${items.map((i) => i.label).join(' / ')}`);
 }
@@ -624,12 +680,17 @@ function posterOf(t: PickTarget): string | undefined {
  * не добраться: под курсором всегда выигрывает видео.
  */
 function showAllOptions(t: PickTarget, x: number, y: number): void {
-  const items: { label: string; run: () => void }[] = [];
+  const items: MenuItem[] = [];
 
   if (t.kind === 'video') {
     const video: PickTarget = { ...t, altImageUrl: undefined };
-    // Без chosen: где есть качества, фон вернёт их вторым меню
-    items.push({ label: 'Скачать видео', run: () => void send(video, { wantVariants: true }) });
+    // Основная зона качает немедленно, правая открывает качества. Ожидание
+    // разведки живёт только за правой зоной, где его сами попросили
+    items.push({
+      label: 'Скачать видео',
+      run: () => void send(video, { chosen: true }),
+      aside: { hint: 'Авто', run: () => void send(video, { wantVariants: true }) },
+    });
     items.push({ label: 'Только звук', run: () => void send(video, { streams: 'audio', chosen: true }) });
     const poster = posterOf(t);
     if (poster) {
@@ -644,14 +705,29 @@ function showAllOptions(t: PickTarget, x: number, y: number): void {
       run: () => void send({ el: t.el, kind: 'image', url: t.url }, { chosen: true }),
     });
     if (t.postUrl) {
+      const fromPost: PickTarget = { el: t.el, kind: 'video', postUrl: t.postUrl };
       items.push({
         label: 'Скачать видео',
-        run: () => void send({ el: t.el, kind: 'video', postUrl: t.postUrl }, { wantVariants: true }),
+        run: () => void send(fromPost, { chosen: true }),
+        aside: { hint: 'Авто', run: () => void send(fromPost, { wantVariants: true }) },
       });
     }
   }
 
   openMenu(x, y, items);
+  void labelAside(t);
+}
+
+/** Подставить в правую зону настоящее качество вместо «Авто» */
+async function labelAside(t: PickTarget): Promise<void> {
+  const res = await chrome.runtime
+    .sendMessage({ type: 'known-variants', url: t.url, pageUrl: t.postUrl })
+    .catch(() => undefined);
+  const first = (res?.variants as PickVariant[] | undefined)?.[0]?.label;
+  if (!first || !menuEl) return;
+  const more = menuEl.querySelector<HTMLButtonElement>('.split .more');
+  // «1080p · 24,7 МБ» → «1080p»: в зону влезает только само качество
+  if (more?.firstChild) more.firstChild.replaceWith(first.split(' · ')[0]);
 }
 
 document.addEventListener(
