@@ -71,20 +71,44 @@ function mediaThumb(el: HTMLElement): string | undefined {
 /** Адреса, по которым узнаётся страница одного ролика, а не лента */
 const POST_LINK = /\/(watch\?v=|shorts\/|status\/|reel\/|video\/|videos\/|clip\/|episode\/)/;
 
+/** Карточка поста в ленте: у X это article, у остальных — свои приметы */
+const POST_CARD = 'article, [role="article"], [data-testid="tweet"], [data-testid="cellInnerDiv"]';
+
+/** Ссылка на пост внутри узла — ближайшая к видео */
+function postLinkIn(node: Element): string | undefined {
+  for (const a of node.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+    const abs = absUrl(a.href);
+    if (abs && POST_LINK.test(abs)) return abs;
+  }
+  return undefined;
+}
+
 /** Постоянная ссылка на пост с видео: yt-dlp не умеет качать /home и главную
- *  ютуба — ему нужен адрес конкретного ролика. Ищем ближайшую к видео ссылку
- *  на пост, поднимаясь от него к карточке-контейнеру. */
+ *  ютуба — ему нужен адрес конкретного ролика. */
 function postUrl(v: HTMLElement): string | undefined {
   // Страница сама и есть страница ролика — лучше ссылки не найти
   if (POST_LINK.test(location.href)) return stripSelfHash(location.href);
+
+  // Карточка поста целиком: в ленте X от видео до неё полтора десятка узлов,
+  // и подъём по одному уровню за раз до ссылки не доходил
+  const card = v.closest(POST_CARD);
+  if (card) {
+    const inCard = postLinkIn(card);
+    if (inCard) return inCard;
+  }
+
+  // Разметка незнакомая — поднимаемся сами, но заметно выше прежнего
   let node: HTMLElement | null = v;
-  for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
-    for (const a of node.querySelectorAll<HTMLAnchorElement>('a[href]')) {
-      const abs = absUrl(a.href);
-      if (abs && POST_LINK.test(abs)) return abs;
-    }
+  for (let depth = 0; node && depth < 16; depth++, node = node.parentElement) {
+    const found = postLinkIn(node);
+    if (found) return found;
   }
   return undefined;
+}
+
+/** Похоже на ленту: роликов много, и адрес страницы ни одному из них не адрес */
+function looksLikeFeed(): boolean {
+  return document.querySelectorAll('video').length > 1 && !POST_LINK.test(location.href);
 }
 
 /** Хэш в адресе ролика — позиция плеера, качать по нему нечего */
@@ -390,8 +414,11 @@ function videoTarget(v: HTMLVideoElement): PickTarget {
   const src = v.currentSrc || v.src || '';
   const direct = src.startsWith('blob:') ? null : absUrl(src);
   if (direct) return { el: v, kind: 'video', url: direct };
-  // MSE: потока с адресом не существует, зато есть страница поста
-  return { el: v, kind: 'video', postUrl: postUrl(v) ?? location.href };
+  // MSE: потока с адресом не существует, зато есть страница поста. В ленте
+  // адрес самой страницы подсовывать нечестно — yt-dlp по /home ничего не
+  // найдёт и загрузка отвалится ошибкой
+  const post = postUrl(v);
+  return { el: v, kind: 'video', postUrl: post ?? (looksLikeFeed() ? undefined : location.href) };
 }
 
 /** Курсор над нашим же интерфейсом: меню выбора или панель загрузок.
@@ -477,6 +504,8 @@ function frameLabel(t: PickTarget): string {
     const size = img?.naturalWidth ? ` ${img.naturalWidth}×${img.naturalHeight}` : '';
     return t.postUrl ? `картинка${size} — или ролик` : `картинка${size}`;
   }
+  // Ленты бывают такие, что пост у видео не опознать — честнее сказать заранее
+  if (!t.url && !t.postUrl) return 'не понять, из какого поста ролик';
   const via = t.url ? 'видео' : 'видео — yt-dlp, до 1080p';
   return t.altImageUrl ? `${via} — или картинка` : via;
 }

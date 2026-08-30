@@ -1115,7 +1115,11 @@ async function handlePick(
 
   // MSE: потока с адресом нет, качаем страницу поста через yt-dlp
   const pageUrl = msg.postUrl ?? msg.pageUrl;
-  if (!pageUrl) return { ok: false, error: 'Не удалось понять, что это за видео' };
+  if (!pageUrl) {
+    // В ленте адрес поста не всегда достаётся из разметки; адрес самой ленты
+    // yt-dlp отвергает, поэтому не делаем вид, что загрузка началась
+    return { ok: false, error: 'Не нашёл, к какому посту относится ролик — открой пост и качай оттуда' };
+  }
   if (!picked) {
     const variants = pickVariants(undefined, pageUrl);
     if (variants.length) return { ok: true, variants };
