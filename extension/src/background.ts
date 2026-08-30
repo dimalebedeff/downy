@@ -1062,22 +1062,48 @@ chrome.commands.onCommand.addListener((command) => {
   })();
 });
 
-// Запасной путь для картинок — там, где правый клик сайтом не перехвачен
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create(
-    { id: 'downy-image', title: 'Скачать картинку через Downy', contexts: ['image'] },
-    () => void chrome.runtime.lastError,
-  );
-});
+/** Запасной путь к прицелу: там, где правый клик сайтом не перехвачен.
+ *  Пересобираем при каждом пробуждении воркера — иначе пункты живут только
+ *  до первой выгрузки service worker и «пропадают» без всякой причины. */
+function setupContextMenus(): void {
+  chrome.contextMenus.removeAll(() => {
+    const quiet = (): void => void chrome.runtime.lastError;
+    chrome.contextMenus.create(
+      { id: 'downy-image', title: 'Скачать картинку через Downy', contexts: ['image'] },
+      quiet,
+    );
+    chrome.contextMenus.create(
+      { id: 'downy-media', title: 'Скачать это видео через Downy', contexts: ['video', 'audio'] },
+      quiet,
+    );
+    chrome.contextMenus.create(
+      { id: 'downy-page', title: 'Скачать видео с этой страницы (yt-dlp)', contexts: ['page'] },
+      quiet,
+    );
+  });
+}
+
+setupContextMenus();
+chrome.runtime.onInstalled.addListener(setupContextMenus);
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== 'downy-image' || !info.srcUrl || tab?.id == null) return;
-  void handlePick(tab.id, {
-    kind: 'image',
-    url: info.srcUrl,
-    pageUrl: info.pageUrl,
-    pageTitle: tab.title,
-  });
+  const tabId = tab?.id;
+  if (tabId == null || !tab) return;
+  const common = { pageUrl: info.pageUrl, pageTitle: tab.title };
+
+  if (info.menuItemId === 'downy-image' && info.srcUrl) {
+    void handlePick(tabId, { kind: 'image', url: info.srcUrl, ...common });
+    return;
+  }
+  if (info.menuItemId === 'downy-media') {
+    // У MSE-плеера srcUrl это blob: — качать по нему нечего, идём через yt-dlp
+    const direct = info.srcUrl && !info.srcUrl.startsWith('blob:') ? info.srcUrl : undefined;
+    void handlePick(tabId, { kind: 'video', url: direct, postUrl: direct ? undefined : info.pageUrl, ...common });
+    return;
+  }
+  if (info.menuItemId === 'downy-page') {
+    void handlePick(tabId, { kind: 'video', postUrl: info.pageUrl, ...common });
+  }
 });
 
 interface Message {
