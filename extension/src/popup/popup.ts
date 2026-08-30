@@ -47,17 +47,11 @@ let lastJobs: JobInfo[] = [];
 // Живые шкалы и подписи: jobId → элементы, которые обновляем на месте без
 // перерисовки, иначе CSS-переход ширины не срабатывает и полоска дёргается.
 // У одной загрузки их может быть два: шкала на карточке и строка в очереди
-const liveBars = new Map<string, { fill?: HTMLDivElement; label: HTMLElement; spin?: HTMLElement }[]>();
-
-/** Сказать пока нечего — крутим спиннер вместо слов */
-function showProgressText(el: { label: HTMLElement; spin?: HTMLElement }, text: string): void {
-  el.label.textContent = text;
-  if (el.spin) el.spin.hidden = text !== '';
-}
+const liveBars = new Map<string, { fill?: HTMLDivElement; label: HTMLElement }[]>();
 // Перерисовку отложили (открыт кебаб) — догоним на ближайшем поллинге
 let needsRender = false;
 
-function trackLive(jobId: string, el: { fill?: HTMLDivElement; label: HTMLElement; spin?: HTMLElement }): void {
+function trackLive(jobId: string, el: { fill?: HTMLDivElement; label: HTMLElement }): void {
   const list = liveBars.get(jobId);
   if (list) list.push(el);
   else liveBars.set(jobId, [el]);
@@ -68,7 +62,7 @@ function updateJobProgress(job: JobInfo): void {
   if (!els) return;
   const { text, ratio } = jobProgressView(job);
   for (const el of els) {
-    showProgressText(el, text);
+    el.label.textContent = text;
     if (!el.fill) continue;
     if (ratio != null) {
       el.fill.classList.remove('indeterminate');
@@ -918,10 +912,7 @@ function queueRow(job: JobInfo): HTMLLIElement {
 
   const state = document.createElement('span');
   state.className = 'job-text';
-  const spin = document.createElement('span');
-  spin.className = 'row-spin';
-  spin.hidden = true;
-  row.append(typeIcon(job), title, spin, state);
+  row.append(typeIcon(job), title, state);
 
   if (job.state === 'queued') {
     state.classList.add('queued');
@@ -931,7 +922,8 @@ function queueRow(job: JobInfo): HTMLLIElement {
     state.textContent = 'пауза';
     row.append(resumeBtn(job), cancelBtn(job));
   } else {
-    showProgressText({ label: state, spin }, jobProgressView(job).text);
+    // Пусто — о начале говорит бегущая полоса под строкой
+    state.textContent = jobProgressView(job).text;
     if (!job.noQueue) row.append(pauseBtn(job));
     row.append(cancelBtn(job));
   }
@@ -949,7 +941,7 @@ function queueRow(job: JobInfo): HTMLLIElement {
     if (job.state === 'paused') bar.classList.add('paused');
     bar.append(fill);
     li.append(bar);
-    if (job.state !== 'paused') trackLive(job.jobId, { fill, label: state, spin });
+    if (job.state !== 'paused') trackLive(job.jobId, { fill, label: state });
   }
 
   return li;
