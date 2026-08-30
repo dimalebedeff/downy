@@ -1154,7 +1154,8 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         break;
       }
       case 'log': {
-        log('popup', String(msg.message ?? ''));
+        // Метку шлёт отправитель: попап и прицел на странице различаются
+        log(msg.source === 'page' ? 'page' : 'popup', String(msg.message ?? ''));
         sendResponse({ ok: true });
         break;
       }

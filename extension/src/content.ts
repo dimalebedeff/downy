@@ -210,6 +210,11 @@ interface SendOpts {
 }
 
 
+/** Событие прицела в общий coapp.log — через фон, своего порта у страницы нет */
+function log(message: string): void {
+  void chrome.runtime.sendMessage({ type: 'log', source: 'page', message }).catch(() => {});
+}
+
 let pickerOn = false;
 let hovered: PickTarget | null = null;
 let shadow: ShadowRoot | null = null;
@@ -438,11 +443,13 @@ function openMenu(x: number, y: number, items: { label: string; run: () => void 
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       closeMenu();
+      log(`выбрали в меню: ${item.label}`);
       item.run();
     });
     menuEl.append(btn);
   }
   root.append(menuEl);
+  log(`меню: ${items.map((i) => i.label).join(' / ')}`);
 }
 
 /** Качества видео — их присылает фон, когда вариантов больше одного */
@@ -551,8 +558,9 @@ document.addEventListener(
   'click',
   (e) => {
     if (!pickerOn) return;
-    // Клик по нашему меню — пусть отработает его кнопка
-    if (menuEl && e.composedPath().includes(menuEl)) return;
+    // Клик по нашему меню — пусть отработает его кнопка. Судим по координатам:
+    // shadow root закрытый, и composedPath() снаружи меню не показывает
+    if (menuEl && hits(menuEl, e.clientX, e.clientY)) return;
     e.preventDefault();
     e.stopPropagation();
     if (menuEl) {
@@ -562,6 +570,7 @@ document.addEventListener(
     const t = pickAt(e.clientX, e.clientY);
     // Клик мимо медиа — выходим: страница должна вернуться к хозяину
     if (!t) {
+      log('клик мимо медиа — выходим из прицела');
       leavePicker();
       return;
     }
