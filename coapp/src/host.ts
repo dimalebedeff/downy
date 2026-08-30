@@ -13,6 +13,7 @@ import {
   uniquePath,
   YTDLP_COMMON_ARGS,
 } from '../../shared/ytdlp';
+import { parseFfmpegInfo, type ProbedMedia } from '../../shared/ffmpeg-info';
 import { readMessages, sendMessage } from './nm';
 import type {
   CoAppRequest,
@@ -21,6 +22,7 @@ import type {
   HlsJobRequest,
   JobEvent,
   PickDirRequest,
+  ProbeMediaRequest,
   ProbeRequest,
   StreamSelection,
   ThumbnailJobRequest,
@@ -841,6 +843,57 @@ function pause(jobId: string): void {
   job.kill();
 }
 
+// ---------- Что внутри файла: спрашиваем ffmpeg, а не имя ----------
+
+/** Заголовок обычно в начале файла и читается мгновенно; у части mp4 он лежит
+ *  в конце — такой кандидат просто не дождётся своей очереди */
+const PROBE_TIMEOUT_MS = 8000;
+/** Больше и не нужно: кандидатов у одного ролика единицы */
+const PROBE_MAX = 6;
+
+function probeOne(url: string, headers?: ProbeMediaRequest['headers']): Promise<ProbedMedia> {
+  return new Promise((resolve) => {
+    const args = ['-hide_banner'];
+    if (headers?.userAgent) args.push('-user_agent', headers.userAgent);
+    if (headers?.referer) args.push('-headers', `Referer: ${headers.referer}
+`);
+    // Без выходного файла ffmpeg печатает разбор и выходит с ошибкой — она и нужна
+    args.push('-i', url);
+
+    let child: ChildProcess;
+    try {
+      child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    } catch {
+      resolve({ url, ok: false });
+      return;
+    }
+    let out = '';
+    const timer = setTimeout(() => killProcessTree(child), PROBE_TIMEOUT_MS);
+    child.stderr?.on('data', (d: Buffer) => {
+      out = (out + d.toString()).slice(0, 8000);
+    });
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve({ url, ok: false });
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve({ url, ...parseFfmpegInfo(out) });
+    });
+  });
+}
+
+async function probeMedia(req: ProbeMediaRequest): Promise<void> {
+  const urls = req.urls.slice(0, PROBE_MAX);
+  log('probe_media start', urls.length, 'кандидатов');
+  const results = await Promise.all(urls.map((u) => probeOne(u, req.headers)));
+  for (const r of results) {
+    log('probe_media', r.ok ? 'ok' : 'мимо', r.hasAudio ? 'звук есть' : 'звука нет',
+      r.durationSec ? `${Math.round(r.durationSec)} с` : '', r.width ? `${r.width}x${r.height}` : '', r.url.slice(-80));
+  }
+  sendMessage({ type: 'probe_media', reqId: req.reqId, results });
+}
+
 process.on('uncaughtException', (e) => log('uncaught', e.stack ?? e.message));
 
 readMessages((raw) => {
@@ -869,6 +922,9 @@ readMessages((raw) => {
       break;
     case 'thumb':
       enqueueThumb(msg);
+      break;
+    case 'probe_media':
+      void probeMedia(msg);
       break;
     case 'show_in_folder':
       showInFolder(msg.path);

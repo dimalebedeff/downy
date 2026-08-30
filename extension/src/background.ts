@@ -9,6 +9,8 @@ import { nextSpeed, type SpeedTrack } from './lib/speed';
 import { withCutSuffix } from './lib/cut';
 import { qualityOptions } from './lib/ytdlp-formats';
 import { assetIds, imageStem, previewSiblings } from './lib/pick';
+import { pickBestMedia } from './lib/media-probe';
+import type { ProbedMedia } from '../../shared/ffmpeg-info';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
 import type {
   CoAppEvent,
@@ -416,6 +418,8 @@ const pendingPickDir = new Map<string, (res: { dir: string | null; error?: strin
 
 // Запрошенные у CoApp кадры-превью: reqId -> куда положить результат
 const pendingThumbs = new Map<string, { tabId: number; url: string }>();
+/** Кто ждёт ответа о содержимом кандидатов (имя занято разведкой страниц) */
+const pendingMediaProbes = new Map<string, (results: ProbedMedia[]) => void>();
 
 // ---------- Разведка форматов (кеш по URL страницы) ----------
 
@@ -480,6 +484,12 @@ function getCoAppPort(): chrome.runtime.Port {
           ? { status: 'ready', title: msg.title, thumbnailUrl: msg.thumbnailUrl, formats: msg.formats ?? [] }
           : { status: 'error', error: msg.error },
       );
+      return;
+    }
+    if (msg.type === 'probe_media') {
+      const resolve = pendingMediaProbes.get(msg.reqId);
+      pendingMediaProbes.delete(msg.reqId);
+      resolve?.(msg.results);
       return;
     }
     if (msg.type === 'thumb') {
@@ -977,37 +987,52 @@ function relatedVideo(tabId: number, imageUrl: string): MediaItem | undefined {
   return relatives(tabId, imageUrl).find((it) => it.url !== imageUrl);
 }
 
-/**
- * Полноценный ролик вместо того, что играет в плеере. Озон (и не он один)
- * крутит на странице немое превью в низком разрешении, а файл со звуком лежит
- * рядом под тем же идентификатором — скачивать надо его.
- */
-function betterVideo(tabId: number, url: string, known?: MediaItem): MediaItem | undefined {
-  const best = relatives(tabId, url)[0];
-  if (!best || best.url === url) return undefined;
-  return (best.size ?? 0) > (known?.size ?? 0) ? best : undefined;
+/** Спрашиваем хост, что внутри у кандидатов; молчит — считаем, что не знаем */
+function probeCandidates(urls: string[], pageUrl?: string): Promise<ProbedMedia[]> {
+  return new Promise((resolve) => {
+    const reqId = crypto.randomUUID();
+    const done = (results: ProbedMedia[]): void => {
+      pendingMediaProbes.delete(reqId);
+      clearTimeout(timer);
+      resolve(results);
+    };
+    const timer = setTimeout(() => done([]), 12_000);
+    pendingMediaProbes.set(reqId, done);
+    const sent = sendToCoApp({
+      type: 'probe_media',
+      reqId,
+      urls,
+      headers: { referer: pageUrl, userAgent: navigator.userAgent },
+    });
+    if (!sent.ok) done([]);
+  });
 }
 
 /**
- * Полная дорожка вместо превью-огрызка. В сеть попадает только то, что
- * страница проигрывала: у неоткрытого ролика есть лишь `preview.mp4` — десять
- * секунд без звука. Соседние дорожки лежат по предсказуемому адресу, поэтому
- * спрашиваем сам CDN, начиная с лучшего качества.
+ * Настоящий файл среди похожих. Имя не отличает ролик от немого превью, а
+ * содержимое отличает: ffmpeg читает заголовок по сети за доли секунды и
+ * говорит, есть ли звук, сколько длится и какого размера кадр. Кандидатов
+ * берём из пойманного по сети и из соседних адресов у CDN.
+ *
+ * Проверка стоит времени, поэтому запускаем её только когда есть сомнение:
+ * файл похож на превью или у ролика нашлись родственники.
  */
-async function fullVersionOf(url: string, pageUrl?: string): Promise<string | undefined> {
-  for (const candidate of previewSiblings(url)) {
-    try {
-      // Диапазон в один байт: существование проверяем, файл не тянем
-      const res = await fetch(candidate, {
-        method: 'GET',
-        headers: { Range: 'bytes=0-0', ...(pageUrl ? { Referer: pageUrl } : {}) },
-      });
-      if (res.ok) return candidate;
-    } catch {
-      // Сети нет или CDN отказал — просто пробуем следующего
-    }
+async function resolveRealFile(
+  tabId: number,
+  url: string,
+  pageUrl?: string,
+): Promise<{ url: string; probe?: ProbedMedia } | undefined> {
+  const candidates = new Set<string>([url]);
+  for (const kin of relatives(tabId, url)) {
+    if (isProbablyVideo(kin.url, kin.contentType)) candidates.add(kin.url);
   }
-  return undefined;
+  for (const sibling of previewSiblings(url)) candidates.add(sibling);
+  if (candidates.size < 2) return undefined;
+
+  const results = await probeCandidates([...candidates], pageUrl);
+  const best = pickBestMedia(results);
+  if (!best) return undefined;
+  return { url: best.url, probe: best };
 }
 
 async function handlePick(
@@ -1055,22 +1080,23 @@ async function handlePick(
       const variants = pickVariants(known);
       if (variants.length) return { ok: true, variants };
     }
-    // Плеер мог играть немое превью — берём полный файл того же ролика
-    const better = picked ? undefined : betterVideo(tabId, msg.url, known);
-    if (better) {
-      log('page', `вместо превью качаем полный файл: ${better.url.slice(0, 160)}`);
+    // Под курсором мог играть немой огрызок — ищем настоящий файл по содержимому
+    const real = await resolveRealFile(tabId, msg.url, msg.pageUrl);
+    let url = msg.url;
+    if (real && real.url !== msg.url) {
+      log('page', `взяли не то, что играло, а настоящий файл: ${real.url.slice(0, 160)}`);
+      url = real.url;
     }
-    // Полного файла в сети могло не быть вовсе: ролик не проигрывали, и есть
-    // только превью. Спрашиваем CDN про соседей — там ролик целиком и со звуком
-    let url = better?.url ?? msg.url;
-    if (!better) {
-      const full = await fullVersionOf(url, msg.pageUrl);
-      if (full) {
-        log('page', `превью подменили полной дорожкой: ${full.slice(0, 160)}`);
-        url = full;
+    // Звука нет ни у кого, а адрес страницы известен — у yt-dlp свои источники
+    if (real?.probe && real.probe.hasVideo && !real.probe.hasAudio && msg.pageUrl) {
+      log('page', 'ни у одного файла нет звука — уходим на yt-dlp по странице');
+      const viaPage = await startYtdlpJob(msg.pageUrl, msg.pageTitle, streams, PICKER_MAX_HEIGHT);
+      if (viaPage.ok) {
+        if (viaPage.jobId) trackPageJob(tabId, viaPage.jobId);
+        return viaPage;
       }
     }
-    const item: MediaItem = better ?? (url === msg.url ? known : undefined) ?? {
+    const item: MediaItem = (url === msg.url ? known : undefined) ?? {
       url,
       kind: 'direct',
       tabId,

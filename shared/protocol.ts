@@ -1,3 +1,5 @@
+import type { ProbedMedia } from './ffmpeg-info';
+
 // Протокол сообщений между расширением и CoApp (Native Messaging).
 
 /** Какие дорожки сохранять: всё, только видео или только аудио */
@@ -183,6 +185,17 @@ export interface LogRequest {
   message: string;
 }
 
+/** Что внутри у кандидатов: имя файла не отличает ролик от немого превью */
+export interface ProbeMediaRequest {
+  type: 'probe_media';
+  reqId: string;
+  urls: string[];
+  headers?: {
+    referer?: string;
+    userAgent?: string;
+  };
+}
+
 export type CoAppRequest =
   | HlsJobRequest
   | DirectJobRequest
@@ -194,6 +207,7 @@ export type CoAppRequest =
   | CleanupPartialsRequest
   | PingRequest
   | LogRequest
+  | ProbeMediaRequest
   | PickDirRequest
   | ThumbRequest
   | ShowInFolderRequest
@@ -256,4 +270,18 @@ export interface UpdateEvent {
   message?: string;
 }
 
-export type CoAppEvent = PongEvent | JobEvent | PickDirEvent | ThumbEvent | HeartbeatEvent | UpdateEvent | ProbeEvent;
+export interface ProbeMediaEvent {
+  type: 'probe_media';
+  reqId: string;
+  results: ProbedMedia[];
+}
+
+export type CoAppEvent =
+  | PongEvent
+  | JobEvent
+  | PickDirEvent
+  | ThumbEvent
+  | HeartbeatEvent
+  | UpdateEvent
+  | ProbeEvent
+  | ProbeMediaEvent;
