@@ -586,12 +586,9 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 .type-icon { flex: none; display: inline-flex; align-items: center; color: var(--accent); }
 .type-ic { display: block; }
 
-/* «Открыть» — компактная текстовая кнопка */
-.open-btn { flex: none; font-size: 11px; padding: 0 2px; }
-
-/* Иконочная кнопка папки — без подписи, действие в тултипе.
+/* «Открыть» — компактная иконочная кнопка (play), второстепенное действие.
    Свой класс, а не общий .icon-btn: у того контурные SVG (шестерёнка). */
-.folder-btn {
+.icon-act-btn {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -605,8 +602,11 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
   color: var(--muted);
   cursor: pointer;
 }
-.folder-btn svg { fill: currentColor; }
-.folder-btn:hover { background: var(--chip); color: var(--accent-deep); }
+.icon-act-btn svg { fill: currentColor; }
+.icon-act-btn:hover { background: var(--chip); color: var(--accent-deep); }
+
+/* «в папке» — акцентная текстовая кнопка, главное действие после скачивания */
+.folder-link { flex: none; font-size: 11px; padding: 0 2px; font-weight: 600; }
 
 /* ---------- Подвал ---------- */
 

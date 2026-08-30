@@ -209,6 +209,12 @@ function coverUrlFor(item: MediaItem): string | undefined {
   return [item.thumb, pageThumb].find((u) => u?.startsWith('http'));
 }
 
+/** Для показа: настоящее превью (http: poster/og:image) важнее нашего
+ *  canvas-стопкадра (data:) — на ютубе плеер без poster давал кадр вместо обложки. */
+function displayThumb(...cands: (string | undefined)[]): string | undefined {
+  return cands.find((u) => u?.startsWith('http')) ?? cands.find(Boolean);
+}
+
 function downloadCover(item: MediaItem, coverUrl: string): void {
   void chrome.runtime.sendMessage({
     type: 'download-direct',
@@ -360,7 +366,7 @@ function renderMedia(): void {
 
     const thumbBox = document.createElement('div');
     thumbBox.className = 'thumb';
-    const thumbSrc = item.thumb ?? pageThumb;
+    const thumbSrc = displayThumb(item.thumb, pageThumb);
     if (thumbSrc) {
       const img = document.createElement('img');
       img.src = thumbSrc;
@@ -429,7 +435,7 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
 
   const thumbBox = document.createElement('div');
   thumbBox.className = 'thumb';
-  const thumbSrc = pv.thumb ?? pageThumb;
+  const thumbSrc = displayThumb(pv.thumb, pageThumb);
   if (thumbSrc) {
     const img = document.createElement('img');
     img.src = thumbSrc;
@@ -650,27 +656,27 @@ function resumeBtn(job: JobInfo): HTMLButtonElement {
   });
 }
 
-/** «Открыть» — запускает файл дефолтным приложением через хост */
+/** «Открыть» — компактная иконка play, запускает файл дефолтным приложением */
 function openBtn(outFile: string): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.className = 'link-btn open-btn';
-  btn.textContent = 'Открыть';
-  btn.title = outFile;
-  btn.addEventListener('click', async () => {
+  const btn = smallBtn('icon-act-btn', '', 'Открыть', async () => {
     const res = await chrome.runtime.sendMessage({ type: 'open-file', path: outFile });
     if (!res?.ok) showError(res?.error ?? 'Не удалось открыть файл');
   });
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
   return btn;
 }
 
-/** Компактная иконка папки — «Показать в папке» */
+/** «в папке» — акцентная текстовая кнопка, главное действие после скачивания */
 function folderBtn(outFile: string): HTMLButtonElement {
-  const btn = smallBtn('icon-btn folder-btn', '', 'Показать в папке', async () => {
+  const btn = document.createElement('button');
+  btn.className = 'link-btn folder-link';
+  btn.textContent = 'в папке';
+  btn.title = 'Показать в папке';
+  btn.addEventListener('click', async () => {
     const res = await chrome.runtime.sendMessage({ type: 'show-in-folder', path: outFile });
     if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку');
   });
-  btn.innerHTML =
-    '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg>';
   return btn;
 }
 
