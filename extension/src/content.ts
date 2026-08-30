@@ -249,21 +249,31 @@ function ui(): ShadowRoot {
     'all: initial; position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 2147483647; pointer-events: none;';
   shadow = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
+  const cyrillic = chrome.runtime.getURL('fonts/golos-cyrillic.woff2');
+  const latin = chrome.runtime.getURL('fonts/golos-latin.woff2');
   style.textContent = [
+    // Golos Text вшит в расширение — тот же шрифт, что в попапе, интернет не нужен
+    "@font-face { font-family: 'Downy Golos'; font-weight: 400 900; font-display: swap;",
+    `  src: url('${cyrillic}') format('woff2');`,
+    '  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }',
+    "@font-face { font-family: 'Downy Golos'; font-weight: 400 900; font-display: swap;",
+    `  src: url('${latin}') format('woff2');`,
+    '  unicode-range: U+0000-00FF, U+2000-206F, U+2212, U+FEFF, U+FFFD; }',
+    ":host { font-family: 'Downy Golos', system-ui, 'Segoe UI', sans-serif; }",
     '.frame { position: fixed; border: 2px solid #f5c518; border-radius: 6px;',
     '  box-shadow: 0 0 14px rgba(245, 197, 24, .55); pointer-events: none; }',
     '.frame.taken { border-color: #22c55e; box-shadow: 0 0 14px rgba(34, 197, 94, .5); }',
     '.tag { position: absolute; top: -11px; left: -2px; padding: 1px 6px; border-radius: 5px;',
-    '  background: #f5c518; color: #1b1c20; font: 600 11px/1.5 system-ui, sans-serif; white-space: nowrap; }',
+    "  background: #f5c518; color: #1b1c20; font: 600 11px/1.5 'Downy Golos', system-ui, sans-serif; white-space: nowrap; }",
     '.frame.taken .tag { background: #22c55e; color: #fff; }',
     '.panel { display: flex; align-items: center; gap: 8px;',
     '  padding: 8px 12px; border-radius: 10px; background: #1b1c20; color: #f2f3f5;',
-    '  font: 600 12.5px/1.4 system-ui, sans-serif; box-shadow: 0 8px 28px rgba(0, 0, 0, .38); pointer-events: none; }',
+    "  font: 600 12.5px/1.4 'Downy Golos', system-ui, sans-serif; box-shadow: 0 8px 28px rgba(0, 0, 0, .38); pointer-events: none; }",
     '.panel b { color: #f5c518; }',
     '.panel span { font-weight: 400; opacity: .72; }',
     '.menu { position: fixed; min-width: 168px; padding: 4px; border: 1px solid #e3e4e8;',
     '  border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(20, 20, 25, .18);',
-    '  font: 400 13px/1.4 system-ui, sans-serif; pointer-events: auto; }',
+    "  font: 400 13px/1.4 'Downy Golos', system-ui, sans-serif; pointer-events: auto; }",
     '.menu button { display: block; width: 100%; padding: 6px 10px; border: none; border-radius: 6px;',
     '  background: none; color: #1b1c20; font: inherit; text-align: left; cursor: pointer; }',
     '.menu button:hover { background: #ececef; }',

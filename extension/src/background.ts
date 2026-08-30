@@ -231,6 +231,10 @@ function clearTab(tabId: number): void {
   tabPageThumb.delete(tabId);
   tabPageVideos.delete(tabId);
   tabRemoved.delete(tabId);
+  // Новая страница — новый контент-скрипт, и прицел в нём выключен. Не забыть
+  // об этом здесь значило бы, что первый Alt+Shift+D после F5 «выключает»
+  // то, чего уже нет, и режим включается лишь со второго нажатия
+  pickCounts.delete(tabId);
   persist();
 }
 
