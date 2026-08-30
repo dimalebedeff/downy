@@ -319,6 +319,13 @@ function ui(): ShadowRoot {
     "  color: #1b1c20; font: 600 11px/1 'Downy Golos', system-ui, sans-serif; cursor: pointer; }",
     '.split .more:hover { background: #f5c518; color: #1b1c20; }',
     '.split .more svg { display: block; }',
+    /* Пробив идёт: значение временное, поэтому бледное, а на месте шеврона
+       крутится кольцо — ширина зоны при этом почти как у готового «1080p» */
+    '.split .more.pending { color: #8b9099; }',
+    '.more-ring { display: inline-block; width: 11px; height: 11px; border-radius: 50%;',
+    '  border: 2px solid #dcdce0; border-top-color: #94740a; animation: spin .7s linear infinite; }',
+    '.split .more.ready { animation: zoneReady .5s ease; }',
+    '@keyframes zoneReady { 0% { background: #f5c518; } 100% { background: #f0f0f2; } }',
     '.menu > button { display: block; width: 100%; padding: 6px 10px; border: none; border-radius: 6px;',
     '  background: none; color: #1b1c20; font: inherit; text-align: left; cursor: pointer; }',
     '.menu > button:hover { background: #ececef; }',
@@ -337,6 +344,8 @@ function ui(): ShadowRoot {
     '  .split:hover { background: #313642; }',
     '  .split .more { border-left-color: #414857; background: #2f3540; color: #f2f3f5; }',
     '  .split .more:hover { background: #f5c518; color: #1b1c20; }',
+    '  .more-ring { border-color: #414857; border-top-color: #f5c518; }',
+    '  @keyframes zoneReady { 0% { background: #f5c518; color: #1b1c20; } 100% { background: #2f3540; } }',
     '}',
     /* Уголок: панель Downy — один объект вместо россыпи карточек */
     '.corner { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column;',
@@ -566,12 +575,19 @@ function drawFrame(t: PickTarget | null): void {
 
 function closeMenu(): void {
   window.clearInterval(busyTimer);
+  window.clearInterval(asidePoll);
   busyTimer = 0;
+  asidePoll = 0;
   menuEl?.remove();
   menuEl = null;
 }
 
 /** Меню у курсора. Появляется только там, где есть из чего выбирать */
+const CHEVRON_SVG =
+  '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+  '<path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.6"' +
+  ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 let lastMenuAt = { x: 0, y: 0 };
 
 interface MenuItem {
@@ -626,12 +642,7 @@ function menuRow(item: MenuItem): HTMLElement {
   more.className = 'more';
   more.title = 'Выбрать качество';
   more.append(item.aside.hint);
-  more.insertAdjacentHTML(
-    'beforeend',
-    '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
-      '<path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.6"' +
-      ' stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  );
+  more.insertAdjacentHTML('beforeend', CHEVRON_SVG);
   more.addEventListener('click', (e) => {
     e.stopPropagation();
     fire(`${item.label} → выбор качества`, item.aside!.run);
@@ -759,16 +770,62 @@ function showAllOptions(t: PickTarget, x: number, y: number): void {
   void labelAside(t);
 }
 
-/** Подставить в правую зону настоящее качество вместо «Авто» */
-async function labelAside(t: PickTarget): Promise<void> {
-  const res = await chrome.runtime
-    .sendMessage({ type: 'known-variants', url: t.url, pageUrl: t.postUrl })
-    .catch(() => undefined);
-  const first = (res?.variants as PickVariant[] | undefined)?.[0]?.label;
-  if (!first || !menuEl) return;
-  const more = menuEl.querySelector<HTMLButtonElement>('.split .more');
+/** Зона качества: «1080p ▾» — качества известны, «Авто» с кольцом — пробив идёт */
+function paintAside(label?: string, pending = false): void {
+  const more = menuEl?.querySelector<HTMLButtonElement>('.split .more');
+  if (!more) return;
+  more.textContent = '';
   // «1080p · 24,7 МБ» → «1080p»: в зону влезает только само качество
-  if (more?.firstChild) more.firstChild.replaceWith(first.split(' · ')[0]);
+  more.append(label ? label.split(' · ')[0] : 'Авто');
+  if (pending) {
+    more.classList.add('pending');
+    const ring = document.createElement('span');
+    ring.className = 'more-ring';
+    more.append(ring);
+    return;
+  }
+  more.classList.remove('pending');
+  more.insertAdjacentHTML('beforeend', CHEVRON_SVG);
+  if (label) {
+    // Короткая вспышка: зона созрела, даже если смотрел в другое место
+    more.classList.add('ready');
+    window.setTimeout(() => more.classList.remove('ready'), 500);
+  }
+}
+
+let asidePoll = 0;
+
+/** Спрашиваем качества и, пока их нет, ждём разведку — она уже запущена */
+async function labelAside(t: PickTarget): Promise<void> {
+  const ask = (warm: boolean): Promise<{ variants?: PickVariant[]; probing?: boolean } | undefined> =>
+    chrome.runtime
+      .sendMessage({ type: 'known-variants', url: t.url, pageUrl: t.postUrl, warm })
+      .catch(() => undefined);
+
+  const res = await ask(true);
+  if (!menuEl) return;
+  const first = res?.variants?.[0]?.label;
+  if (first) {
+    paintAside(first);
+    return;
+  }
+  if (!res?.probing) return;
+
+  paintAside(undefined, true);
+  window.clearInterval(asidePoll);
+  asidePoll = window.setInterval(() => {
+    if (!menuEl) {
+      window.clearInterval(asidePoll);
+      return;
+    }
+    void ask(false).then((later) => {
+      const ready = later?.variants?.[0]?.label;
+      if (!ready || !menuEl) return;
+      window.clearInterval(asidePoll);
+      paintAside(ready);
+      log('качества доехали, пока меню открыто');
+    });
+  }, 600);
 }
 
 document.addEventListener(

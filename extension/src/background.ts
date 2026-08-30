@@ -1317,13 +1317,20 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         break;
       }
       case 'known-variants': {
-        // Что известно про качества прямо сейчас, без разведки: подпись в меню
-        // должна появляться мгновенно, а не через несколько секунд
+        // Что известно про качества прямо сейчас: подпись в меню должна
+        // появляться мгновенно, а не через несколько секунд
         const tabId = sender.tab?.id;
         const url = msg.url as string | undefined;
         const pageUrl = msg.pageUrl as string | undefined;
         const known = tabId != null && url ? tabMedia.get(tabId)?.get(url) : undefined;
-        sendResponse({ variants: pickVariants(known, pageUrl) });
+        const variants = pickVariants(known, pageUrl);
+        // Нечего показать — заводим разведку прямо сейчас, не дожидаясь клика
+        // по зоне: пока человек читает меню, она успеет проехать половину пути
+        let probing = false;
+        if (variants.length === 0 && pageUrl && msg.warm) {
+          probing = ensureProbe(pageUrl).status === 'pending';
+        }
+        sendResponse({ variants, probing });
         break;
       }
       case 'picker-off': {
