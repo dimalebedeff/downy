@@ -314,6 +314,7 @@ function ui(): ShadowRoot {
     '.p-spin { flex: none; width: 12px; height: 12px; border-radius: 50%;',
     '  border: 2px solid #ececef; border-top-color: #f5c518; animation: spin .7s linear infinite; }',
     '.p-spin[hidden] { display: none; }',
+    '@keyframes spin { to { transform: rotate(360deg); } }',
     /* Крестик держит своё место всегда — иначе строка дёргалась бы на ховере */
     '.p-cancel { flex: none; width: 16px; height: 16px; padding: 0; border: none; border-radius: 5px;',
     '  background: none; color: #6e7278; cursor: pointer; opacity: 0; transition: opacity .12s ease;',
