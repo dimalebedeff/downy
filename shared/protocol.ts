@@ -174,6 +174,15 @@ export interface ThumbRequest {
   };
 }
 
+/** Событие из расширения — ложится в общий coapp.log, чтобы вся цепочка
+ *  «клик в попапе → фон → хост → yt-dlp» читалась одним файлом по порядку. */
+export interface LogRequest {
+  type: 'log';
+  /** Откуда прилетело: popup или фоновый скрипт */
+  source: 'popup' | 'bg';
+  message: string;
+}
+
 export type CoAppRequest =
   | HlsJobRequest
   | DirectJobRequest
@@ -184,6 +193,7 @@ export type CoAppRequest =
   | PauseRequest
   | CleanupPartialsRequest
   | PingRequest
+  | LogRequest
   | PickDirRequest
   | ThumbRequest
   | ShowInFolderRequest

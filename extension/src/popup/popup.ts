@@ -114,7 +114,18 @@ function setBanner(text: string, isErr: boolean, show: boolean): void {
 }
 
 /** Настоящая поломка — красная точка и пояснение выскакивает само. */
+/** Событие попапа в общий coapp.log — своего порта у него нет, шлём через фон */
+function log(message: string): void {
+  void chrome.runtime.sendMessage({ type: 'log', message }).catch(() => {});
+}
+
+/** Длинные URL режем: лог должен читаться, а не тонуть в query-хвостах */
+function shortUrl(url: string): string {
+  return url.length > 120 ? `${url.slice(0, 120)}…` : url;
+}
+
 function showError(text: string): void {
+  log(`ошибка на экране: ${text}`);
   hardError = true;
   setBanner(text, true, true);
   refreshDot();
@@ -464,6 +475,7 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
   btn.dataset.pendingKey = pv.url;
   if (pendingStarts.has(pv.url)) applyPending(btn, true);
   const start = (streams: StreamSelection, cut?: CutRange): void => {
+    log(`клик «Скачать»: yt-dlp streams=${streams}${cut ? ' отрезок' : ''} ${shortUrl(pv.url)}`);
     void startAndWatch(
       btn,
       pv.url,
@@ -687,7 +699,10 @@ function applyPending(btn: HTMLButtonElement, on: boolean): void {
 
 /** Кнопку с этим ключом рисуем в ожидании — и сейчас, и после перерисовки */
 function markPending(btn: HTMLButtonElement, key: string): void {
-  const timer = window.setTimeout(() => clearPending(key), PENDING_TIMEOUT_MS);
+  const timer = window.setTimeout(() => {
+    log(`ожидание истекло за ${PENDING_TIMEOUT_MS} мс, кнопку вернули: ${shortUrl(key)}`);
+    clearPending(key);
+  }, PENDING_TIMEOUT_MS);
   pendingStarts.set(key, { timer });
   applyPending(btn, true);
 }
@@ -705,7 +720,10 @@ function clearPending(key: string): void {
 /** Загрузка доехала до списка — кнопка снова живая. Зовём до перерисовки. */
 function resolvePending(jobs: JobInfo[]): void {
   for (const [key, pending] of [...pendingStarts]) {
-    if (pending.jobId && jobs.some((j) => j.jobId === pending.jobId)) clearPending(key);
+    if (pending.jobId && jobs.some((j) => j.jobId === pending.jobId)) {
+      log(`загрузка ${pending.jobId} в списке — кнопка снова живая`);
+      clearPending(key);
+    }
   }
 }
 
@@ -717,7 +735,10 @@ async function startAndWatch(
   send: () => Promise<StartResponse | undefined>,
   fallbackError: string,
 ): Promise<void> {
-  if (pendingStarts.has(key)) return;
+  if (pendingStarts.has(key)) {
+    log(`повторный клик отбит, ждём предыдущий старт: ${shortUrl(key)}`);
+    return;
+  }
   markPending(btn, key);
   let res: StartResponse | undefined;
   try {
@@ -732,9 +753,11 @@ async function startAndWatch(
   }
   // jobId нет — выбор папки отменили, качать нечего
   if (!res.jobId) {
+    log('старт отменён: папку не выбрали');
     clearPending(key);
     return;
   }
+  log(`старт принят, ждём загрузку ${res.jobId}`);
   const pending = pendingStarts.get(key);
   if (pending) pending.jobId = res.jobId;
   // Загрузка могла встать в список раньше, чем доехал ответ
@@ -749,6 +772,7 @@ function download(
   key: string,
   cut?: CutRange,
 ): void {
+  log(`клик «Скачать»: ${item.kind} streams=${streams}${cut ? ' отрезок' : ''} ${shortUrl(item.url)}`);
   void startAndWatch(
     btn,
     key,
@@ -991,6 +1015,7 @@ async function refresh(): Promise<void> {
 async function init(): Promise<void> {
   [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   await refresh();
+  log(`попап открыт: медиа=${lastItems.length} видео-страниц=${pageVideos.length} загрузок=${lastJobs.length}`);
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === 'jobs-updated') {

@@ -45,6 +45,29 @@ function log(...args: unknown[]): void {
   }
 }
 
+const LOG_MAX_BYTES = 1024 * 1024;
+
+/** Лог рос без предела — при старте оставляем только свежий хвост */
+function rotateLog(): void {
+  try {
+    const { size } = fs.statSync(logFile);
+    if (size <= LOG_MAX_BYTES) return;
+    const keep = Math.floor(LOG_MAX_BYTES / 2);
+    const buf = Buffer.alloc(keep);
+    const fd = fs.openSync(logFile, 'r');
+    fs.readSync(fd, buf, 0, keep, size - keep);
+    fs.closeSync(fd);
+    // Первая строка обрезана посередине (а то и посреди символа) — выкидываем
+    const text = buf.toString('utf8');
+    const nl = text.indexOf('\n');
+    fs.writeFileSync(logFile, nl >= 0 ? text.slice(nl + 1) : '');
+  } catch {
+    // лог не критичен
+  }
+}
+
+rotateLog();
+
 const engine = createYtdlpEngine({ binDir, log });
 const { ffmpegPath, ytdlpPath } = engine;
 
@@ -804,7 +827,13 @@ process.on('uncaughtException', (e) => log('uncaught', e.stack ?? e.message));
 
 readMessages((raw) => {
   const msg = raw as CoAppRequest;
-  log('recv', JSON.stringify(msg).slice(0, 300));
+  if (msg.type === 'log') {
+    // Расширение пишет сюда же: цепочка «клик → фон → хост» одним файлом
+    log(`[${msg.source}]`, msg.message);
+  } else if (msg.type !== 'ping') {
+    // ping сыплется каждые пару секунд и не несёт ничего — в лог не пускаем
+    log('recv', JSON.stringify(msg).slice(0, 300));
+  }
   switch (msg.type) {
     case 'ping':
       sendMessage({

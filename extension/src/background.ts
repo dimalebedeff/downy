@@ -100,6 +100,7 @@ const NO_QUEUE_MAX_BYTES = 250 * 1024 * 1024;
 
 /** Ставит загрузку в очередь; noQueue-мелочь стартует сразу и параллельно */
 function enqueueJob(job: JobInfo, req: CoAppRequest): void {
+  log('bg', `queued ${job.jobId} ${job.label}${job.noQueue ? ' (мимо очереди)' : ''}`);
   jobs.set(job.jobId, job);
   jobRequests.set(job.jobId, req);
   if (job.noQueue) {
@@ -490,6 +491,9 @@ function getCoAppPort(): chrome.runtime.Port {
     if (msg.type !== 'job') return;
     const job = jobs.get(msg.jobId);
     if (!job) return;
+    if (msg.state !== job.state) {
+      log('bg', `job ${msg.jobId} ${job.state} -> ${msg.state}${msg.message ? ` (${msg.message.slice(0, 200)})` : ''}`);
+    }
     job.state = msg.state;
     // Пауза шлёт progress: null — не стираем позицию полоски
     if (msg.state !== 'paused' || msg.progress != null) job.progress = msg.progress;
@@ -515,6 +519,7 @@ function getCoAppPort(): chrome.runtime.Port {
   });
   port.onDisconnect.addListener(() => {
     const err = chrome.runtime.lastError?.message;
+    log('bg', `coapp отключился: ${err ?? '(без причины)'}`);
     coappPort = null;
     if (updateInProgress) {
       updateInProgress = false;
@@ -553,6 +558,17 @@ function getCoAppPort(): chrome.runtime.Port {
 
 function broadcastJobs(): void {
   void chrome.runtime.sendMessage({ type: 'jobs-updated', jobs: jobList() }).catch(() => {});
+}
+
+/** Событие расширения в общий coapp.log. Порт намеренно не поднимаем: логи —
+ *  не повод будить хост, а без хоста всё равно ничего не качается. */
+function log(source: 'popup' | 'bg', message: string): void {
+  if (!coappPort) return;
+  try {
+    coappPort.postMessage({ type: 'log', source, message });
+  } catch {
+    // лог не критичен
+  }
 }
 
 function sendToCoApp(req: CoAppRequest): { ok: boolean; error?: string } {
@@ -929,6 +945,11 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         }
         tabRemoved.set(tabId, removed);
         persist();
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'log': {
+        log('popup', String(msg.message ?? ''));
         sendResponse({ ok: true });
         break;
       }
