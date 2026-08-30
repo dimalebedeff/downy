@@ -66,11 +66,29 @@ function mediaThumb(el: HTMLElement): string | undefined {
   return captureFrame(video);
 }
 
-/** Постоянная ссылка на пост с видео (лента X и подобных):
- *  yt-dlp не умеет качать /home, ему нужен адрес конкретного поста. */
+/** Адреса, по которым узнаётся страница одного ролика, а не лента */
+const POST_LINK = /\/(watch\?v=|shorts\/|status\/|reel\/|video\/|videos\/|clip\/|episode\/)/;
+
+/** Постоянная ссылка на пост с видео: yt-dlp не умеет качать /home и главную
+ *  ютуба — ему нужен адрес конкретного ролика. Ищем ближайшую к видео ссылку
+ *  на пост, поднимаясь от него к карточке-контейнеру. */
 function postUrl(v: HTMLElement): string | undefined {
-  const a = v.closest('article')?.querySelector<HTMLAnchorElement>('a[href*="/status/"]');
-  return a ? absUrl(a.href) ?? undefined : undefined;
+  // Страница сама и есть страница ролика — лучше ссылки не найти
+  if (POST_LINK.test(location.href)) return stripSelfHash(location.href);
+  let node: HTMLElement | null = v;
+  for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+    for (const a of node.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+      const abs = absUrl(a.href);
+      if (abs && POST_LINK.test(abs)) return abs;
+    }
+  }
+  return undefined;
+}
+
+/** Хэш в адресе ролика — позиция плеера, качать по нему нечего */
+function stripSelfHash(url: string): string {
+  const i = url.indexOf('#');
+  return i < 0 ? url : url.slice(0, i);
 }
 
 /** Видео, играющее через MSE (blob:) — файл руками не взять, но yt-dlp справится.
@@ -272,15 +290,34 @@ function videoTarget(v: HTMLVideoElement): PickTarget {
   return { el: v, kind: 'video', postUrl: postUrl(v) ?? location.href };
 }
 
-/** Что под курсором. Поднимаемся вверх: картинка часто лежит фоном у обёртки */
+/** Курсор реально стоит на этом элементе, даже если сверху лежит чужой слой */
+function hits(el: Element, x: number, y: number): boolean {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+/** Что под курсором. Плееры и галереи накрывают медиа прозрачным слоем —
+ *  elementFromPoint отдаёт этот слой, поэтому на каждом шаге вверх заглядываем
+ *  и внутрь контейнера: берём то видео или картинку, на которых курсор стоит. */
 function pickAt(x: number, y: number): PickTarget | null {
   let node: Element | null = document.elementFromPoint(x, y);
-  for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
+  for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
     if (node instanceof HTMLVideoElement) return videoTarget(node);
     if (node instanceof HTMLImageElement && bigEnough(node)) {
       const url = bestImageUrl(node);
       if (url) return { el: node, kind: 'image', url };
     }
+
+    // Видео под накрывающим слоем важнее картинки: превью часто лежит рядом
+    for (const inner of node.querySelectorAll('video')) {
+      if (hits(inner, x, y)) return videoTarget(inner);
+    }
+    for (const inner of node.querySelectorAll('img')) {
+      if (!hits(inner, x, y) || !bigEnough(inner)) continue;
+      const url = bestImageUrl(inner);
+      if (url) return { el: inner, kind: 'image', url };
+    }
+
     if (bigEnough(node)) {
       const url = backgroundUrl(node);
       if (url) return { el: node, kind: 'image', url };
@@ -414,15 +451,23 @@ function leavePicker(): void {
   void chrome.runtime.sendMessage({ type: 'picker-off' }).catch(() => {});
 }
 
+// Поиск мишени лазает по DOM — на каждый пиксель движения это слишком дорого
+let moveScheduled = false;
 document.addEventListener(
   'mousemove',
   (e) => {
-    if (!pickerOn || menuEl) return;
-    const t = pickAt(e.clientX, e.clientY);
-    // Тот же элемент — рамка уже на месте, лишний раз не дёргаем
-    if (t?.el === hovered?.el) return;
-    hovered = t;
-    drawFrame(t);
+    if (!pickerOn || menuEl || moveScheduled) return;
+    moveScheduled = true;
+    const { clientX, clientY } = e;
+    requestAnimationFrame(() => {
+      moveScheduled = false;
+      if (!pickerOn || menuEl) return;
+      const t = pickAt(clientX, clientY);
+      // Тот же элемент — рамка уже на месте, лишний раз не дёргаем
+      if (t?.el === hovered?.el) return;
+      hovered = t;
+      drawFrame(t);
+    });
   },
   true,
 );

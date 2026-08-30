@@ -161,3 +161,50 @@ describe('filterPageItems', () => {
     expect(filterPageItems(items, undefined, NOW)).toHaveLength(1);
   });
 });
+
+describe('дубли одного файла с разных префиксов CDN', () => {
+  const at = (url: string, size?: number): MediaItem => ({
+    url,
+    kind: 'direct',
+    tabId: 1,
+    foundAt: 1,
+    contentType: 'video/mp4',
+    size,
+  });
+
+  it('озон отдаёт один ролик как /sashimi/ и /vod/ — это одна карточка', () => {
+    const groups = groupMediaItems([
+      at('https://vr-1.ozone.ru/sashimi/video-71/01M026/asset_1_h264.mp4?type=review&sw-prefetch=true', 900_000),
+      at('https://vr-1.ozone.ru/vod/video-71/01M026/asset_1_h264.mp4', 2_648_760),
+      at('https://vr-1.ozone.ru/vod/video-71/01M026/asset_1_h264.mp4?type=review', 2_648_760),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].members).toHaveLength(3);
+    // Показываем самый весомый вариант
+    expect(groups[0].primary.size).toBe(2_648_760);
+  });
+
+  it('разные ролики одного CDN не слипаются', () => {
+    const groups = groupMediaItems([
+      at('https://vr-1.ozone.ru/vod/video-71/01M026/asset_1_h264.mp4', 2_000_000),
+      at('https://vr-1.ozone.ru/vod/video-72/01KZXM/asset_1_h264.mp4', 2_000_000),
+    ]);
+    expect(groups).toHaveLength(2);
+  });
+
+  it('одинаковое имя в разных папках — разные файлы', () => {
+    const groups = groupMediaItems([
+      at('https://site.com/2024/clip.mp4', 1_000_000),
+      at('https://site.com/2023/clip.mp4', 1_000_000),
+    ]);
+    expect(groups).toHaveLength(2);
+  });
+
+  it('разные хосты не смешиваются', () => {
+    const groups = groupMediaItems([
+      at('https://a.example/media/clip.mp4', 1_000_000),
+      at('https://b.example/media/clip.mp4', 1_000_000),
+    ]);
+    expect(groups).toHaveLength(2);
+  });
+});

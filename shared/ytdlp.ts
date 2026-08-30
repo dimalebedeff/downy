@@ -341,7 +341,16 @@ export function createYtdlpEngine(o: { binDir: string; log?: Log }): YtdlpEngine
         if (outFile) cleanupPartials(outFile);
         events.onFinish({ state: 'canceled' });
       } else if (code === 0) {
-        events.onFinish({ state: 'done', outFile });
+        // Нулём yt-dlp выходит и когда качать было нечего — например, дали
+        // адрес ленты вместо страницы ролика. «Готово» без файла — враньё
+        if (outFile && !fs.existsSync(outFile)) {
+          events.onFinish({
+            state: 'error',
+            message: errTail.slice(-500) || 'yt-dlp не нашёл по этому адресу ни одного ролика',
+          });
+        } else {
+          events.onFinish({ state: 'done', outFile });
+        }
       } else {
         events.onFinish({ state: 'error', message: errTail.slice(-500) || `exit code ${code}` });
       }

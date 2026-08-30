@@ -942,6 +942,13 @@ function forgetBtn(job: JobInfo): HTMLButtonElement {
   });
 }
 
+/** «14:32» — время окончания; дата не нужна, список чистится руками */
+function fmtFinished(at?: number): string {
+  if (!at) return '';
+  const d = new Date(at);
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 function finishedRow(job: JobInfo): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'tail-job';
@@ -964,7 +971,11 @@ function finishedRow(job: JobInfo): HTMLLIElement {
     state.classList.add('err');
     state.textContent = 'ошибка';
   }
-  row.append(typeIcon(job), title, state);
+  const at = document.createElement('span');
+  at.className = 'job-at';
+  at.textContent = fmtFinished(job.finishedAt);
+  at.title = job.finishedAt ? new Date(job.finishedAt).toLocaleString() : '';
+  row.append(typeIcon(job), title, at, state);
 
   if (job.state === 'done' && job.outFile) {
     row.append(openBtn(job.outFile), folderBtn(job.outFile));
@@ -990,7 +1001,10 @@ function renderJobs(): void {
   // скачивания, завершённые хвостом. Карточки наверху не меняются, поэтому
   // полоска нужна каждой активной строке
   const queue = lastJobs.filter((j) => isUnfinished(j.state));
-  const finished = lastJobs.filter((j) => !isUnfinished(j.state));
+  // Свежие сверху: только что скачанное ищут первым, а не листают вниз
+  const finished = lastJobs
+    .filter((j) => !isUnfinished(j.state))
+    .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0));
   jobsSection.hidden = queue.length === 0 && finished.length === 0;
   clearJobsBtn.hidden = finished.length === 0;
   jobsList.textContent = '';

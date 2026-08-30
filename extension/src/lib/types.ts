@@ -47,4 +47,7 @@ export interface JobInfo {
   speedBps?: number;
   message?: string;
   outFile?: string;
+  /** Когда загрузка закончилась (готово/ошибка/отмена) — для порядка и часов
+   *  в списке завершённых */
+  finishedAt?: number;
 }

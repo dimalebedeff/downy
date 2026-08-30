@@ -512,6 +512,7 @@ function getCoAppPort(): chrome.runtime.Port {
     }
     if (msg.outFile) job.outFile = msg.outFile;
     if (msg.state === 'done' || msg.state === 'error' || msg.state === 'canceled') {
+      job.finishedAt = Date.now();
       jobRequests.delete(msg.jobId);
     }
     persist();

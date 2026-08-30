@@ -493,6 +493,14 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 .bar.paused .bar-fill::after { display: none; }
 
 .job-text { flex: none; font-size: 11px; color: var(--muted); white-space: nowrap; }
+/* Время окончания: тише размера, цифры не пляшут при разной ширине знаков */
+.job-at {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--muted);
+  opacity: .75;
+  font-variant-numeric: tabular-nums;
+}
 .job-text.done { color: var(--ok); font-weight: 600; }
 .job-text.err { color: var(--err); }
 .job-text.queued { font-style: italic; }

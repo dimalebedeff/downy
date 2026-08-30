@@ -92,10 +92,21 @@ function mediaClass(item: MediaItem): string {
   return isProbablyVideo(item.url, item.contentType) ? 'video' : 'media';
 }
 
+/**
+ * Хвост пути — то, что отличает файл, а не способ доставки. CDN отдают один и
+ * тот же ролик под разными префиксами (/vod/… и /sashimi/… у озона), и по
+ * полному пути он превращался в две карточки. Берём два последних сегмента:
+ * одного мало — файлы с общим именем в разных папках слиплись бы в один.
+ */
+function pathTail(pathname: string): string {
+  const parts = pathname.split('/').filter(Boolean);
+  return parts.slice(-2).join('/');
+}
+
 function groupKey(item: MediaItem): string {
   try {
     const u = new URL(item.url);
-    return `${mediaClass(item)}|${u.host}${u.pathname}`;
+    return `${mediaClass(item)}|${u.host}|${pathTail(u.pathname)}`;
   } catch {
     return `${mediaClass(item)}|${item.url}`;
   }
