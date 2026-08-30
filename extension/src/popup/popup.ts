@@ -92,19 +92,22 @@ function itemTitle(item: MediaItem): string {
   }
 }
 
-// ---------- Индикатор: зелёный — есть что качать, серый — пусто, красный — беда ----------
+// ---------- Индикатор помощника: зелёный — на связи, красный — беда ----------
+//
+// Точка говорит только о помощнике: раньше она требовала ещё и найденного
+// медиа и оставалась серой на пустой странице — притом что баннер рядом
+// сообщал «помощник на связи». Есть ли что качать, видно по самому списку.
 
 let coappOk: boolean | null = null; // null — ещё проверяем
 let hardError = false;
-let lastHasMedia = false;
 
 function refreshDot(): void {
-  const kind = hardError || coappOk === false ? 'err' : coappOk && lastHasMedia ? 'ok' : 'unknown';
+  const kind = hardError || coappOk === false ? 'err' : coappOk ? 'ok' : 'unknown';
   statusDot.className = `dot dot-${kind}`;
   statusDot.title =
-    kind === 'ok' ? 'Медиа найдено, помощник на связи'
+    kind === 'ok' ? 'Помощник на связи — нажми, чтобы увидеть подробности'
     : kind === 'err' ? 'Что-то не работает — нажми'
-    : 'Медиа на вкладке пока нет';
+    : 'Проверяю помощника…';
 }
 
 function setBanner(text: string, isErr: boolean, show: boolean): void {
@@ -327,8 +330,7 @@ function renderMedia(): void {
     (pv) => !activeTab?.url || samePage(pv.pageHref ?? pv.url, activeTab.url),
   );
   const showPageCards = groups.length === 0 && currentPageVideos.length > 0;
-  lastHasMedia = groups.length > 0 || showPageCards;
-  emptyEl.hidden = lastHasMedia;
+  emptyEl.hidden = groups.length > 0 || showPageCards;
   refreshDot();
 
   // yt-dlp: звезда пустого экрана, скромная строчка — когда медиа есть.
