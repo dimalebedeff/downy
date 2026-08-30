@@ -400,7 +400,7 @@ function frameLabel(t: PickTarget): string {
     const size = img?.naturalWidth ? ` ${img.naturalWidth}×${img.naturalHeight}` : '';
     return t.postUrl ? `картинка${size} — или ролик` : `картинка${size}`;
   }
-  const via = t.url ? 'видео' : 'видео — через yt-dlp';
+  const via = t.url ? 'видео' : 'видео — yt-dlp, до 1080p';
   return t.altImageUrl ? `${via} — или картинка` : via;
 }
 

@@ -864,6 +864,13 @@ function broadcastUpdateProgress(state: string, message?: string): void {
 
 // ---------- Прицел: медиа выбирают кликом на самой странице ----------
 
+/**
+ * Потолок качества для клика прицелом. Без разведки yt-dlp берёт «лучшее», а на
+ * ютубе это 2160p: полчаса ожидания вместо пяти минут, причём чаще всего ради
+ * ролика, который посмотрят один раз. Явный выбор в меню этот потолок снимает.
+ */
+const PICKER_MAX_HEIGHT = 1080;
+
 /** Вкладки с включённым прицелом и счётчик взятого — для плашки на странице */
 const pickCounts = new Map<number, number>();
 
@@ -1007,9 +1014,12 @@ async function handlePick(
     const variants = pickVariants(undefined, pageUrl);
     if (variants.length) return { ok: true, variants };
   }
-  log('page', `взяли видео через yt-dlp streams=${streams} ${pageUrl.slice(0, 160)}`);
+  log(
+    'page',
+    `взяли видео через yt-dlp streams=${streams} до ${msg.variantUrl ?? PICKER_MAX_HEIGHT}p ${pageUrl.slice(0, 160)}`,
+  );
   // У yt-dlp вариант приходит высотой кадра, а не адресом
-  const maxHeight = msg.variantUrl ? Number(msg.variantUrl) : undefined;
+  const maxHeight = msg.variantUrl ? Number(msg.variantUrl) : PICKER_MAX_HEIGHT;
   // В имя файла идёт «1080p60» — без веса, который висит в подписи меню
   const qualityLabel = msg.variantLabel?.split(' · ')[0];
   // Заголовок вкладки годится, только когда качаем её же. Из ленты уходит
