@@ -1062,6 +1062,19 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         sendResponse(sendToCoApp({ type: 'open_file', path: msg.path as string }));
         break;
       }
+      case 'remove-job': {
+        // Убрать одну завершённую строку; активную так не трогаем — у неё отмена
+        const id = msg.jobId as string;
+        const job = jobs.get(id);
+        if (job && !isUnfinished(job.state)) {
+          log('bg', `убрали из списка ${id} ${job.label}`);
+          jobs.delete(id);
+          jobRequests.delete(id);
+          persist();
+        }
+        sendResponse({ jobs: jobList() });
+        break;
+      }
       case 'clear-jobs': {
         for (const [id, job] of jobs) {
           if (job.state === 'done' || job.state === 'error' || job.state === 'canceled') {

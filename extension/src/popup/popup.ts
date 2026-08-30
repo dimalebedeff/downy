@@ -932,6 +932,16 @@ function queueRow(job: JobInfo): HTMLLIElement {
   return li;
 }
 
+/** Убрать одну завершённую загрузку: раньше был только «очистить» на все */
+function forgetBtn(job: JobInfo): HTMLButtonElement {
+  return smallBtn('cancel-btn', '✕', 'Убрать из списка', async () => {
+    log(`убираем из списка ${job.jobId}`);
+    const res = await chrome.runtime.sendMessage({ type: 'remove-job', jobId: job.jobId });
+    lastJobs = res?.jobs ?? lastJobs.filter((j) => j.jobId !== job.jobId);
+    renderMedia();
+  });
+}
+
 function finishedRow(job: JobInfo): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'tail-job';
@@ -959,6 +969,7 @@ function finishedRow(job: JobInfo): HTMLLIElement {
   if (job.state === 'done' && job.outFile) {
     row.append(openBtn(job.outFile), folderBtn(job.outFile));
   }
+  row.append(forgetBtn(job));
 
   li.append(row);
 
