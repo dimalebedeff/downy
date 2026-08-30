@@ -189,6 +189,19 @@ interface PickTarget {
   url?: string;
   /** У видео через MSE адреса нет — качаем страницу поста через yt-dlp */
   postUrl?: string;
+  /** Картинка под тем же курсором: постер плеера, превью ролика в ленте */
+  altImageUrl?: string;
+}
+
+/** Адреса, которые уедут в загрузку с этой мишени */
+function targetKeys(t: PickTarget): string[] {
+  return [t.url, t.postUrl, t.altImageUrl].filter((u): u is string => !!u);
+}
+
+/** Всё, что можно было взять с этой мишени, уже взято */
+function isTaken(t: PickTarget): boolean {
+  const keys = targetKeys(t);
+  return keys.length > 0 && keys.every((k) => takenKeys.has(k));
 }
 
 interface PickVariant {
@@ -222,7 +235,10 @@ let frameEl: HTMLDivElement | null = null;
 let tagEl: HTMLSpanElement | null = null;
 let panelEl: HTMLDivElement | null = null;
 let menuEl: HTMLDivElement | null = null;
-const takenEls = new WeakSet<Element>();
+/** Взятое помним по адресу, а не по элементу: на главной ютуба один и тот же
+ *  <video> переезжает от превью к превью, и по элементу все ролики после
+ *  первого выглядели бы уже скачанными. */
+const takenKeys = new Set<string>();
 
 /** Своя песочница стилей: вёрстка сайта не должна ломать прицел, а рамки —
  *  лезть в саму страницу. Хост мышь не ловит, ловит только меню внутри. */
@@ -366,13 +382,17 @@ function imageTarget(el: Element, url: string): PickTarget {
   };
 }
 
-/** Видео важнее картинки: под курсором на плеере лежит и постер, и ролик */
+/** Видео важнее картинки, но постер плеера и превью в ленте — тоже добыча.
+ *  Нашли под курсором оба — не решаем за человека, показываем выбор. */
 function pickAt(x: number, y: number): PickTarget | null {
-  return videoAt(x, y) ?? imageAt(x, y);
+  const video = videoAt(x, y);
+  const image = imageAt(x, y);
+  if (!video) return image;
+  return image?.url ? { ...video, altImageUrl: image.url } : video;
 }
 
 function frameLabel(t: PickTarget): string {
-  if (takenEls.has(t.el)) return '✓ уже взято';
+  if (isTaken(t)) return '✓ уже взято';
   if (t.kind === 'image') {
     // Настоящий размер файла, а не растянутый на экране: сразу видно, что
     // под курсором мелкая обложка, а не полноразмерный снимок
@@ -380,7 +400,8 @@ function frameLabel(t: PickTarget): string {
     const size = img?.naturalWidth ? ` ${img.naturalWidth}×${img.naturalHeight}` : '';
     return t.postUrl ? `картинка${size} — или ролик` : `картинка${size}`;
   }
-  return t.url ? 'видео' : 'видео — через yt-dlp';
+  const via = t.url ? 'видео' : 'видео — через yt-dlp';
+  return t.altImageUrl ? `${via} — или картинка` : via;
 }
 
 function drawFrame(t: PickTarget | null): void {
@@ -400,7 +421,7 @@ function drawFrame(t: PickTarget | null): void {
     root.append(frameEl);
   }
   const r = t.el.getBoundingClientRect();
-  frameEl.classList.toggle('taken', takenEls.has(t.el));
+  frameEl.classList.toggle('taken', isTaken(t));
   frameEl.style.left = `${r.left - 2}px`;
   frameEl.style.top = `${r.top - 2}px`;
   frameEl.style.width = `${r.width}px`;
@@ -471,26 +492,28 @@ function showMenu(variants: PickVariant[], t: PickTarget, x: number, y: number):
   );
 }
 
-/** Под курсором превью ролика: и картинка, и ссылка на видео — спрашиваем */
+/** Под курсором и ролик, и картинка — спрашиваем, что именно нужно.
+ *  Случая два: превью со ссылкой на страницу ролика и плеер со своим постером. */
 function showChoice(t: PickTarget, x: number, y: number): void {
+  const videoTgt: PickTarget =
+    t.kind === 'video' ? { ...t, altImageUrl: undefined } : { el: t.el, kind: 'video', postUrl: t.postUrl };
+  const imageUrl = t.kind === 'video' ? t.altImageUrl : t.url;
   openMenu(x, y, [
-    {
-      label: 'Скачать ролик',
-      run: () => void send({ el: t.el, kind: 'video', postUrl: t.postUrl }, { chosen: true }),
-    },
+    { label: 'Скачать ролик', run: () => void send(videoTgt, { chosen: true }) },
     {
       label: 'Скачать картинку',
-      run: () => void send({ el: t.el, kind: 'image', url: t.url }, { chosen: true }),
+      run: () => void send({ el: t.el, kind: 'image', url: imageUrl }, { chosen: true }),
     },
   ]);
 }
 
-function markTaken(t: PickTarget): void {
-  takenEls.add(t.el);
-  if (hovered?.el === t.el) drawFrame(t);
+function markTaken(key: string | undefined): void {
+  if (key) takenKeys.add(key);
+  if (hovered) drawFrame(hovered);
 }
 
 async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
+  const sentUrl = opts.url ?? t.url;
   const res = await chrome.runtime.sendMessage({
     type: 'pick',
     kind: opts.kind ?? t.kind,
@@ -510,7 +533,7 @@ async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
     showMenu(variants, t, r.left + 12, r.top + 12);
     return;
   }
-  if (res?.ok) markTaken(t);
+  if (res?.ok) markTaken(sentUrl ?? t.postUrl);
 }
 
 function setPicker(on: boolean): void {
@@ -575,9 +598,8 @@ document.addEventListener(
       return;
     }
     hovered = t;
-    // Превью ролика: картинка под курсором, а ссылка ведёт на видео —
-    // угадывать за человека нечего, спрашиваем
-    if (t.kind === 'image' && t.postUrl) {
+    // Под курсором и ролик, и картинка — угадывать за человека нечего
+    if ((t.kind === 'image' && t.postUrl) || (t.kind === 'video' && t.altImageUrl)) {
       showChoice(t, e.clientX, e.clientY);
       return;
     }
