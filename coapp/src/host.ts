@@ -98,7 +98,15 @@ function jobDone(
     fs.rm(outFile, { force: true }, () => {});
     emit({ type: 'job', jobId, state: 'canceled', progress: null });
   } else if (code === 0) {
-    emit({ type: 'job', jobId, state: 'done', progress: 1, outFile });
+    // Итоговый размер с диска: у превью (--skip-download) прогресса с байтами
+    // не было, да и для видео так точнее, чем последний замер загрузки.
+    let bytes: number | undefined;
+    try {
+      bytes = fs.statSync(outFile).size;
+    } catch {
+      // файл мог исчезнуть — не критично, просто без размера
+    }
+    emit({ type: 'job', jobId, state: 'done', progress: 1, outFile, bytes });
   } else {
     emit({ type: 'job', jobId, state: 'error', progress: null, message: errTail.slice(-500) || `exit code ${code}` });
   }
