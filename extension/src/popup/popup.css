@@ -581,9 +581,10 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 }
 .tail-job .bar { margin-top: 5px; }
 
-/* Иконка типа медиа перед названием — фирменный жёлтый */
+/* Иконка типа медиа перед названием — фирменный жёлтый.
+   Цвет только через color: заливку/обводку задают сами SVG-элементы. */
 .type-icon { flex: none; display: inline-flex; align-items: center; color: var(--accent); }
-.type-ic { display: block; fill: currentColor; }
+.type-ic { display: block; }
 
 /* «Открыть» — компактная текстовая кнопка */
 .open-btn { flex: none; font-size: 11px; padding: 0 2px; }

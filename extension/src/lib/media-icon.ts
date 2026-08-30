@@ -24,19 +24,25 @@ export function mediaKindFromFile(nameOrPath: string | undefined): FileKind {
   return 'other';
 }
 
-/** Инлайновый SVG-путь (viewBox 0 0 24 24) для каждого типа — заливка currentColor */
-const ICON_PATH: Record<FileKind, string> = {
-  // Плёнка-рамка с треугольником play
-  video: 'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm2 2v2h2V6H6zm10 0v2h2V6h-2zM6 16v2h2v-2H6zm10 0v2h2v-2h-2zm-6-6.5v5l4-2.5-4-2.5z',
-  // Рамка с солнцем и горой
-  image: 'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm12 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM5 18h14l-4.5-6-3.5 4.5-2.5-3L5 18z',
+// Внутренность SVG (viewBox 0 0 24 24) на каждый тип. fill/stroke заданы
+// прямо на элементах — CSS их не перекрашивает (иначе рамки заливаются).
+const ICON_INNER: Record<FileKind, string> = {
+  // Скруглённая рамка + play — в духе логотипа YouTube
+  video:
+    '<rect x="2" y="5" width="20" height="14" rx="4" fill="none" stroke="currentColor" stroke-width="2"/>' +
+    '<path d="M10 8.7v6.6l5.5-3.3z" fill="currentColor"/>',
+  // Рамка + солнце + гора
+  image:
+    '<rect x="2.5" y="4.5" width="19" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>' +
+    '<circle cx="8" cy="9.5" r="1.7" fill="currentColor"/>' +
+    '<path d="M4 18l4.5-5 3 3.2L15 12l5 6z" fill="currentColor"/>',
   // Нота
-  audio: 'M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z',
-  // Файл-документ (запасной)
-  other: 'M6 2h8l4 4v16H6V2zm7 1.5V7h3.5L13 3.5z',
+  audio: '<path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" fill="currentColor"/>',
+  // Лист-документ (запасной)
+  other: '<path d="M6 2h8l4 4v16H6V2zm7 1.5V7h3.5L13 3.5z" fill="currentColor"/>',
 };
 
-/** SVG-иконка типа, крашенная в фирменный жёлтый (класс .type-ic) */
+/** SVG-иконка типа; цвет берётся из currentColor контейнера (.type-icon) */
 export function typeIconSvg(kind: FileKind): string {
-  return `<svg class="type-ic" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="${ICON_PATH[kind]}"/></svg>`;
+  return `<svg class="type-ic" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">${ICON_INNER[kind]}</svg>`;
 }
