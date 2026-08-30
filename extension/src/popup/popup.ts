@@ -92,11 +92,11 @@ function itemTitle(item: MediaItem): string {
   }
 }
 
-// ---------- Индикатор помощника: зелёный — на связи, красный — беда ----------
+// ---------- Индикатор: зелёный — скачивание работает, красный — нет ----------
 //
-// Точка говорит только о помощнике: раньше она требовала ещё и найденного
-// медиа и оставалась серой на пустой странице — притом что баннер рядом
-// сообщал «помощник на связи». Есть ли что качать, видно по самому списку.
+// Точка отвечает на один вопрос: скачается или нет. Раньше она требовала ещё
+// и найденного медиа и оставалась серой на пустой странице — притом что баннер
+// рядом сообщал, что всё в порядке. Есть ли что качать, видно по списку.
 
 let coappOk: boolean | null = null; // null — ещё проверяем
 let hardError = false;
@@ -105,9 +105,9 @@ function refreshDot(): void {
   const kind = hardError || coappOk === false ? 'err' : coappOk ? 'ok' : 'unknown';
   statusDot.className = `dot dot-${kind}`;
   statusDot.title =
-    kind === 'ok' ? 'Помощник на связи — нажми, чтобы увидеть подробности'
-    : kind === 'err' ? 'Что-то не работает — нажми'
-    : 'Проверяю помощника…';
+    kind === 'ok' ? 'Скачивание работает — нажми, чтобы увидеть подробности'
+    : kind === 'err' ? 'Скачивание не работает — нажми'
+    : 'Проверяю…';
 }
 
 function setBanner(text: string, isErr: boolean, show: boolean): void {
@@ -491,7 +491,7 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
           qualityLabel: select.selectedOptions[0]?.dataset.q,
           cut,
         }),
-      'Помощник недоступен',
+      'Downy на компьютере не отвечает',
     );
   };
   btn.addEventListener('click', () => start('both'));
@@ -789,7 +789,7 @@ function download(
             streams,
             cut,
           }),
-    item.kind === 'direct' ? 'Не удалось начать скачивание' : 'Помощник недоступен',
+    item.kind === 'direct' ? 'Не удалось начать скачивание' : 'Downy на компьютере не отвечает',
   );
 }
 
@@ -1118,7 +1118,7 @@ async function init(): Promise<void> {
       pageTitle: activeTab?.title,
       streams: $<HTMLSelectElement>('#ytdlp-streams').value,
     });
-    if (!res?.ok) showError(res?.error ?? 'Помощник недоступен');
+    if (!res?.ok) showError(res?.error ?? 'Downy на компьютере не отвечает');
     setTimeout(() => (btn.disabled = false), 1500);
   });
 
@@ -1161,19 +1161,23 @@ async function init(): Promise<void> {
   if (status?.ok) {
     defaultOutDir = status.info?.defaultOutDir ?? '';
     if (!outDirInput.value && defaultOutDir) outDirInput.value = defaultOutDir;
-    const missing: string[] = [];
-    if (!status.info?.ffmpeg) missing.push('ffmpeg');
-    if (!status.info?.ytdlp) missing.push('yt-dlp');
-    if (missing.length) {
+    // Каждый инструмент отвечает за своё — говорим, что именно отвалится
+    const noFfmpeg = !status.info?.ffmpeg;
+    const noYtdlp = !status.info?.ytdlp;
+    if (noFfmpeg || noYtdlp) {
       coappOk = false;
-      setBanner(`Помощник работает, но не хватает: ${missing.join(', ')}.\nЗапусти npm run coapp:fetch-bins в папке расширения.`, true, true);
+      const loss =
+        noFfmpeg && noYtdlp ? 'Не скачается ничего: нет ffmpeg и yt-dlp.'
+        : noFfmpeg ? 'Не соберутся стримы и не склеится видео со звуком: нет ffmpeg.'
+        : 'Не скачаются ютуб и сложные сайты: нет yt-dlp.';
+      setBanner(`${loss}\nЗапусти npm run coapp:fetch-bins в папке проекта.`, true, true);
     } else {
       coappOk = true;
-      setBanner(`Помощник Downy v${status.info?.version} на связи — ffmpeg и yt-dlp на месте.`, false, false);
+      setBanner(`Скачивание работает · v${status.info?.version}`, false, false);
     }
   } else {
     coappOk = false;
-    setBanner(`Помощник не отвечает — скачивание работать не будет.\nУстанови его: npm run coapp:install.\n${status?.error ?? ''}`.trim(), true, true);
+    setBanner(`Не скачается ничего: Downy на компьютере не отвечает.\nУстанови: npm run coapp:install.\n${status?.error ?? ''}`.trim(), true, true);
   }
   refreshDot();
 }
