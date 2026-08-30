@@ -560,7 +560,7 @@ function showChoice(t: PickTarget, x: number, y: number): void {
     t.kind === 'video' ? { ...t, altImageUrl: undefined } : { el: t.el, kind: 'video', postUrl: t.postUrl };
   const imageUrl = t.kind === 'video' ? t.altImageUrl : t.url;
   openMenu(x, y, [
-    { label: 'Скачать ролик', run: () => void send(videoTgt, { chosen: true }) },
+    { label: 'Скачать видео', run: () => void send(videoTgt, { chosen: true }) },
     {
       label: 'Скачать картинку',
       run: () => void send({ el: t.el, kind: 'image', url: imageUrl }, { chosen: true }),

@@ -1052,7 +1052,7 @@ async function handlePick(
         return {
           ok: true,
           variants: [
-            { label: 'Скачать ролик', kind: 'video', url: video.url },
+            { label: 'Скачать видео', kind: 'video', url: video.url },
             { label: 'Скачать картинку', kind: 'image', url: msg.url },
           ],
         };
