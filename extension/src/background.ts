@@ -633,13 +633,21 @@ async function resolveJobOutDir(): Promise<{ dir?: string; canceled?: boolean; e
   return { dir: res.dir };
 }
 
+/** Ответ попапу на «Скачать»: jobId есть — джоба встала в очередь и её
+ *  можно ждать в списке; jobId нет — старт отменили (диалог папки) или ошибка. */
+interface StartJobResult {
+  ok: boolean;
+  error?: string;
+  jobId?: string;
+}
+
 async function startHlsJob(
   item: MediaItem,
   variantUrl?: string,
   variantLabel?: string,
   streams: StreamSelection = 'both',
   cut?: CutRange,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<StartJobResult> {
   const dir = await resolveJobOutDir();
   if (dir.canceled) return { ok: true };
   if (dir.error) return { ok: false, error: dir.error };
@@ -663,14 +671,14 @@ async function startHlsJob(
     cut,
     headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
   });
-  return { ok: true };
+  return { ok: true, jobId };
 }
 
 async function startDirectJob(
   item: MediaItem,
   streams: StreamSelection = 'both',
   cut?: CutRange,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<StartJobResult> {
   const dir = await resolveJobOutDir();
   if (dir.canceled) return { ok: true };
   if (dir.error) return { ok: false, error: dir.error };
@@ -702,7 +710,7 @@ async function startDirectJob(
     cut,
     headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
   });
-  return { ok: true };
+  return { ok: true, jobId };
 }
 
 async function startYtdlpJob(
@@ -712,7 +720,7 @@ async function startYtdlpJob(
   maxHeight?: number,
   qualityLabel?: string,
   cut?: CutRange,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<StartJobResult> {
   const dir = await resolveJobOutDir();
   if (dir.canceled) return { ok: true };
   if (dir.error) return { ok: false, error: dir.error };
@@ -752,7 +760,7 @@ async function startYtdlpJob(
     maxHeight,
     cut,
   });
-  return { ok: true };
+  return { ok: true, jobId };
 }
 
 /** Скачать обложку страницы через yt-dlp (для ютуба это превью-картинка). */

@@ -329,6 +329,24 @@ button:disabled { opacity: .5; cursor: default; }
 .primary:hover:not(:disabled) { box-shadow: 0 0 14px var(--glow); filter: brightness(1.04); }
 .primary:active:not(:disabled) { filter: brightness(.95); }
 
+/* Нажали «Скачать», загрузка ещё не встала в список: подпись на месте, по
+   кнопке бежит блик — то же «работа идёт», что у indeterminate-полосы.
+   opacity перебивает блёклый disabled: гасить кнопку тут нечего */
+.primary.is-pending {
+  opacity: 1;
+  cursor: progress;
+  background-image: linear-gradient(100deg, transparent 24%, rgba(255, 255, 255, .82) 50%, transparent 76%);
+  background-size: 220% 100%;
+  animation: shimmer 1.15s linear infinite;
+}
+@keyframes shimmer {
+  from { background-position: 140% 0; }
+  to { background-position: -60% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .primary.is-pending { animation: none; background-position: 50% 0; }
+}
+
 .ghost-btn {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -414,16 +432,7 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 .cut-go { flex: none; padding: 4px 10px; }
 .cut-row.cut-bad input { border-color: var(--err); }
 
-/* ---------- Прогресс в карточке: свечение = жизнь ---------- */
-
-.job-line { display: flex; align-items: center; gap: 8px; margin-top: auto; }
-
-/* Активная загрузка на карточке: цифры сверху, полоска целиком снизу */
-.job-line.stacked { flex-direction: column; align-items: stretch; gap: 5px; }
-/* В колонке flex:1 у .bar работает по вертикали и схлопывает высоту в ноль */
-.job-line.stacked .bar { flex: none; }
-.job-top { display: flex; align-items: center; gap: 6px; }
-.job-top .job-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* ---------- Прогресс в списке загрузок: свечение = жизнь ---------- */
 
 .bar {
   position: relative;

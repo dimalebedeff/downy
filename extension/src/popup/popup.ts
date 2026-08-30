@@ -129,18 +129,6 @@ function groupUrls(group: MediaGroup): Set<string> {
   return urls;
 }
 
-/** Последняя загрузка по URL; активная имеет приоритет над завершённой. */
-function findJobByUrls(urls: Set<string>): JobInfo | undefined {
-  const mine = lastJobs.filter((j) => j.sourceUrl && urls.has(j.sourceUrl));
-  return (
-    mine.filter((j) => j.state === 'running' || j.state === 'starting').at(-1) ?? mine.at(-1)
-  );
-}
-
-function findJob(group: MediaGroup): JobInfo | undefined {
-  return findJobByUrls(groupUrls(group));
-}
-
 // ---------- Кебаб-меню ----------
 
 /** Открыты поля «от – до»: перерисовка списка снесла бы их вместе с вводом */
@@ -346,20 +334,13 @@ function renderMedia(): void {
   }
 
   mediaList.textContent = '';
-  const matched = new Set<string>();
 
   if (showPageCards) {
-    for (const pv of currentPageVideos) {
-      const job = findJobByUrls(new Set([pv.url]));
-      if (job) matched.add(job.jobId);
-      mediaList.append(pageVideoCard(pv, job));
-    }
+    for (const pv of currentPageVideos) mediaList.append(pageVideoCard(pv));
   }
 
   for (const group of groups) {
     const item = group.primary;
-    const job = findJob(group);
-    if (job) matched.add(job.jobId);
 
     const li = document.createElement('li');
     li.className = 'card';
@@ -407,29 +388,19 @@ function renderMedia(): void {
       body.append(meta);
     }
 
-    if (job && isUnfinished(job.state)) {
-      body.append(jobLine(job));
-    } else if (job && job.state === 'done') {
-      body.append(doneLine(job));
-    } else {
-      if (job && job.state === 'error' && job.message) {
-        const msg = document.createElement('div');
-        msg.className = 'job-msg';
-        msg.textContent = job.message.slice(0, 300);
-        body.append(msg);
-      }
-      body.append(actionsRow(group));
-    }
+    // Карточка не меняется никогда: скачал видео+звук — жмёшь ещё раз и
+    // берёшь другую дорожку. Прогресс и результат живут в «Загрузках»
+    body.append(actionsRow(group));
 
     li.append(thumbBox, body, removeBtn([...groupUrls(group)]));
     mediaList.append(li);
   }
 
-  renderJobs(matched);
+  renderJobs();
 }
 
 /** Карточка «на странице есть видео» (MSE/blob) — качаем страницу через yt-dlp. */
-function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
+function pageVideoCard(pv: PageVideo): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'card';
 
@@ -463,89 +434,81 @@ function pageVideoCard(pv: PageVideo, job: JobInfo | undefined): HTMLLIElement {
   title.title = fullTitle === pv.url ? pv.url : `${fullTitle}\n${pv.url}`;
   body.append(title);
 
-  if (job && isUnfinished(job.state)) {
-    body.append(jobLine(job));
-  } else if (job && job.state === 'done') {
-    body.append(doneLine(job));
-  } else {
-    if (job && job.state === 'error' && job.message) {
-      const msg = document.createElement('div');
-      msg.className = 'job-msg';
-      msg.textContent = job.message.slice(0, 300);
-      body.append(msg);
-    }
+  const row = document.createElement('div');
+  row.className = 'card-actions';
 
-    const row = document.createElement('div');
-    row.className = 'card-actions';
-
-    // Выбор качества из разведки; пока она едет — «Лучшее» работает сразу.
-    // Разведка доехала — сразу подставляем конкретное лучшее качество с весом
-    const select = document.createElement('select');
-    select.title = 'Качество';
-    const opts = probeReady ? qualityOptions(probeReady.formats) : [];
-    if (opts.length === 0) select.append(new Option('Лучшее', ''));
-    if (probeReady) {
-      for (const q of opts) {
-        const opt = new Option(q.label, String(q.maxHeight));
-        // В имя файла идёт «1080p60», без веса
-        opt.dataset.q = q.label.split(' · ')[0];
-        select.append(opt);
-      }
-    } else if (pv.probe?.status === 'pending') {
-      // Точки бегут интервалом в init — селект живой, пока идёт разведка
-      const opt = new Option('Пробив', '', true, true);
-      opt.disabled = true;
-      opt.dataset.probing = '1';
+  // Выбор качества из разведки; пока она едет — «Лучшее» работает сразу.
+  // Разведка доехала — сразу подставляем конкретное лучшее качество с весом
+  const select = document.createElement('select');
+  select.title = 'Качество';
+  const opts = probeReady ? qualityOptions(probeReady.formats) : [];
+  if (opts.length === 0) select.append(new Option('Лучшее', ''));
+  if (probeReady) {
+    for (const q of opts) {
+      const opt = new Option(q.label, String(q.maxHeight));
+      // В имя файла идёт «1080p60», без веса
+      opt.dataset.q = q.label.split(' · ')[0];
       select.append(opt);
     }
-
-    const btn = document.createElement('button');
-    btn.className = 'primary';
-    btn.textContent = 'Скачать';
-    const start = async (streams: StreamSelection, cut?: CutRange): Promise<void> => {
-      btn.disabled = true;
-      const res = await chrome.runtime.sendMessage({
-        type: 'download-ytdlp',
-        pageUrl: pv.url,
-        pageTitle: pv.title,
-        streams,
-        maxHeight: select.value ? Number(select.value) : undefined,
-        qualityLabel: select.selectedOptions[0]?.dataset.q,
-        cut,
-      });
-      if (!res?.ok) showError(res?.error ?? 'Помощник недоступен');
-      setTimeout(() => (btn.disabled = false), 1500);
-    };
-    btn.addEventListener('click', () => void start('both'));
-
-    const kebab = document.createElement('button');
-    kebab.className = 'kebab';
-    kebab.textContent = '⋮';
-    kebab.title = 'Ещё';
-    kebab.addEventListener('click', () => {
-      openKebab(kebab, [
-        { label: 'Скачать только видео', run: () => void start('video') },
-        { label: 'Скачать только звук', run: () => void start('audio') },
-        {
-          label: 'Скачать отрезок…',
-          run: () => toggleCutRow(body, (cut) => void start('both', cut)),
-          // Ютуб отрезки не отдаёт — качать весь ролик ради куска не предлагаем
-          disabled: isYoutubeUrl(pv.url),
-          hint: 'Ютуб не отдаёт отрезки — пришлось бы качать весь ролик',
-        },
-        {
-          label: 'Скачать обложку',
-          run: () => {
-            void chrome.runtime.sendMessage({ type: 'download-thumb-ytdlp', pageUrl: pv.url, pageTitle: pv.title });
-          },
-        },
-        { label: 'Копировать ссылку', run: () => void navigator.clipboard.writeText(pv.url) },
-      ]);
-    });
-
-    row.append(btn, wrapSelect(select), kebab);
-    body.append(row);
+  } else if (pv.probe?.status === 'pending') {
+    // Точки бегут интервалом в init — селект живой, пока идёт разведка
+    const opt = new Option('Пробив', '', true, true);
+    opt.disabled = true;
+    opt.dataset.probing = '1';
+    select.append(opt);
   }
+
+  const btn = document.createElement('button');
+  btn.className = 'primary';
+  btn.textContent = 'Скачать';
+  btn.dataset.pendingKey = pv.url;
+  if (pendingStarts.has(pv.url)) applyPending(btn, true);
+  const start = (streams: StreamSelection, cut?: CutRange): void => {
+    void startAndWatch(
+      btn,
+      pv.url,
+      () =>
+        chrome.runtime.sendMessage({
+          type: 'download-ytdlp',
+          pageUrl: pv.url,
+          pageTitle: pv.title,
+          streams,
+          maxHeight: select.value ? Number(select.value) : undefined,
+          qualityLabel: select.selectedOptions[0]?.dataset.q,
+          cut,
+        }),
+      'Помощник недоступен',
+    );
+  };
+  btn.addEventListener('click', () => start('both'));
+
+  const kebab = document.createElement('button');
+  kebab.className = 'kebab';
+  kebab.textContent = '⋮';
+  kebab.title = 'Ещё';
+  kebab.addEventListener('click', () => {
+    openKebab(kebab, [
+      { label: 'Скачать только видео', run: () => start('video') },
+      { label: 'Скачать только звук', run: () => start('audio') },
+      {
+        label: 'Скачать отрезок…',
+        run: () => toggleCutRow(body, (cut) => start('both', cut)),
+        // Ютуб отрезки не отдаёт — качать весь ролик ради куска не предлагаем
+        disabled: isYoutubeUrl(pv.url),
+        hint: 'Ютуб не отдаёт отрезки — пришлось бы качать весь ролик',
+      },
+      {
+        label: 'Скачать обложку',
+        run: () => {
+          void chrome.runtime.sendMessage({ type: 'download-thumb-ytdlp', pageUrl: pv.url, pageTitle: pv.title });
+        },
+      },
+      { label: 'Копировать ссылку', run: () => void navigator.clipboard.writeText(pv.url) },
+    ]);
+  });
+
+  row.append(btn, wrapSelect(select), kebab);
+  body.append(row);
 
   li.append(thumbBox, body, removeBtn([pv.url]));
   return li;
@@ -587,8 +550,11 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
   const btn = document.createElement('button');
   btn.className = 'primary';
   btn.textContent = 'Скачать';
+  // Ключ — карточка, а не выбранный вариант: кнопка на ней всё равно одна
+  btn.dataset.pendingKey = item.url;
+  if (pendingStarts.has(item.url)) applyPending(btn, true);
   const start = (streams: StreamSelection, cut?: CutRange): void => {
-    void download(chosen(), item.kind === 'hls' ? select : null, streams, btn, cut);
+    download(chosen(), item.kind === 'hls' ? select : null, streams, btn, item.url, cut);
   };
   btn.addEventListener('click', () => start('both'));
 
@@ -691,83 +657,114 @@ function typeIcon(job: JobInfo): HTMLSpanElement {
 }
 
 /** Незавершённая загрузка в карточке: шкала с кометой, пауза, отмена. */
-function jobLine(job: JobInfo): HTMLDivElement {
-  const line = document.createElement('div');
-  line.className = 'job-line';
+// ---------- Запуск: клик улетел в фон, загрузка ещё не в списке ----------
 
-  if (job.state === 'queued') {
-    const label = document.createElement('span');
-    label.className = 'job-text queued';
-    label.textContent = 'в очереди';
-    line.append(label, cancelBtn(job));
-    return line;
-  }
+/** Карточки, чей «Скачать» уже нажат, но загрузка ещё не всплыла в «Загрузках».
+ *  Ключ — URL карточки, и состояние живёт вне DOM: перерисовка по jobs-updated
+ *  пересоздаёт кнопку и стёрла бы флаг, повешенный на сам элемент. */
+const pendingStarts = new Map<string, { jobId?: string; timer: number }>();
 
-  const bar = document.createElement('div');
-  bar.className = 'bar';
-  const fill = document.createElement('div');
-  fill.className = 'bar-fill';
-  const { text, ratio } = jobProgressView(job);
-  if (ratio != null) fill.style.width = `${(ratio * 100).toFixed(2)}%`;
-  else if (job.state !== 'paused') fill.classList.add('indeterminate');
-  bar.append(fill);
+/** Хост молчит — кнопку всё равно возвращаем: залипшая хуже лишнего клика */
+const PENDING_TIMEOUT_MS = 15000;
 
-  const label = document.createElement('span');
-  label.className = 'job-text';
-
-  // Цифры и кнопки — этажом выше, полоска — во всю ширину под ними
-  line.classList.add('stacked');
-  const top = document.createElement('div');
-  top.className = 'job-top';
-
-  if (job.state === 'paused') {
-    bar.classList.add('paused');
-    label.textContent = 'пауза';
-    top.append(label, resumeBtn(job), cancelBtn(job));
-  } else {
-    label.textContent = text;
-    trackLive(job.jobId, { fill, label });
-    top.append(label, pauseBtn(job), cancelBtn(job));
-  }
-  line.append(top, bar);
-  return line;
+interface StartResponse {
+  ok?: boolean;
+  error?: string;
+  jobId?: string;
 }
 
-function doneLine(job: JobInfo): HTMLDivElement {
-  const line = document.createElement('div');
-  line.className = 'job-line';
-  const label = document.createElement('span');
-  label.className = 'job-text done';
-  // Размера нет — не пишем ничего: сам факт завершения виден по кнопке папки
-  label.textContent = fmtSize(job.bytes);
-  line.append(label);
-  if (job.outFile) {
-    line.append(openBtn(job.outFile), folderBtn(job.outFile));
-  }
-  return line;
+/** Кнопка карточки по ключу: после перерисовки это уже другой элемент */
+function pendingBtn(key: string): HTMLButtonElement | null {
+  return document.querySelector<HTMLButtonElement>(`.primary[data-pending-key="${CSS.escape(key)}"]`);
 }
 
-async function download(
+function applyPending(btn: HTMLButtonElement, on: boolean): void {
+  btn.classList.toggle('is-pending', on);
+  btn.disabled = on;
+  if (on) btn.title = 'Запускаю загрузку…';
+  else btn.removeAttribute('title');
+}
+
+/** Кнопку с этим ключом рисуем в ожидании — и сейчас, и после перерисовки */
+function markPending(btn: HTMLButtonElement, key: string): void {
+  const timer = window.setTimeout(() => clearPending(key), PENDING_TIMEOUT_MS);
+  pendingStarts.set(key, { timer });
+  applyPending(btn, true);
+}
+
+function clearPending(key: string): void {
+  const pending = pendingStarts.get(key);
+  if (pending) {
+    clearTimeout(pending.timer);
+    pendingStarts.delete(key);
+  }
+  const btn = pendingBtn(key);
+  if (btn) applyPending(btn, false);
+}
+
+/** Загрузка доехала до списка — кнопка снова живая. Зовём до перерисовки. */
+function resolvePending(jobs: JobInfo[]): void {
+  for (const [key, pending] of [...pendingStarts]) {
+    if (pending.jobId && jobs.some((j) => j.jobId === pending.jobId)) clearPending(key);
+  }
+}
+
+/** Общий путь любого «Скачать»: ждём не таймер, а появление своей загрузки
+ *  в списке — только тогда видно, что нажатие вправду сработало. */
+async function startAndWatch(
+  btn: HTMLButtonElement,
+  key: string,
+  send: () => Promise<StartResponse | undefined>,
+  fallbackError: string,
+): Promise<void> {
+  if (pendingStarts.has(key)) return;
+  markPending(btn, key);
+  let res: StartResponse | undefined;
+  try {
+    res = await send();
+  } catch {
+    res = undefined;
+  }
+  if (!res?.ok) {
+    clearPending(key);
+    showError(res?.error ?? fallbackError);
+    return;
+  }
+  // jobId нет — выбор папки отменили, качать нечего
+  if (!res.jobId) {
+    clearPending(key);
+    return;
+  }
+  const pending = pendingStarts.get(key);
+  if (pending) pending.jobId = res.jobId;
+  // Загрузка могла встать в список раньше, чем доехал ответ
+  resolvePending(lastJobs);
+}
+
+function download(
   item: MediaItem,
   select: HTMLSelectElement | null,
   streams: StreamSelection,
   btn: HTMLButtonElement,
+  key: string,
   cut?: CutRange,
-): Promise<void> {
-  btn.disabled = true;
-  try {
-    if (item.kind === 'direct') {
-      const res = await chrome.runtime.sendMessage({ type: 'download-direct', item, streams, cut });
-      if (!res?.ok) showError(res?.error ?? 'Не удалось начать скачивание');
-    } else {
-      const variantUrl = select?.value;
-      const variantLabel = select?.selectedOptions[0]?.textContent ?? undefined;
-      const res = await chrome.runtime.sendMessage({ type: 'download-hls', item, variantUrl, variantLabel, streams, cut });
-      if (!res?.ok) showError(res?.error ?? 'Помощник недоступен');
-    }
-  } finally {
-    setTimeout(() => (btn.disabled = false), 1000);
-  }
+): void {
+  void startAndWatch(
+    btn,
+    key,
+    () =>
+      item.kind === 'direct'
+        ? chrome.runtime.sendMessage({ type: 'download-direct', item, streams, cut })
+        : chrome.runtime.sendMessage({
+            type: 'download-hls',
+            item,
+            variantUrl: select?.value,
+            variantLabel: select?.selectedOptions[0]?.textContent ?? undefined,
+            streams,
+            cut,
+          }),
+    item.kind === 'direct' ? 'Не удалось начать скачивание' : 'Помощник недоступен',
+  );
 }
 
 // ---------- Обновление Downy ----------
@@ -834,9 +831,8 @@ function onUpdateProgress(state: string, message?: string): void {
 
 let dragId: string | null = null;
 
-/** Строка очереди; порядок — сверху вниз, активная первой.
- *  withBar=false — у загрузки есть карточка, полоска живёт там. */
-function queueRow(job: JobInfo, withBar: boolean): HTMLLIElement {
+/** Строка очереди; порядок — сверху вниз, активная первой. */
+function queueRow(job: JobInfo): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'tail-job queue-row';
   li.dataset.jobId = job.jobId;
@@ -864,8 +860,8 @@ function queueRow(job: JobInfo, withBar: boolean): HTMLLIElement {
       const visible = [...jobsList.querySelectorAll<HTMLLIElement>('li.queue-row[draggable="true"]')]
         .map((el) => el.dataset.jobId ?? '')
         .filter(Boolean);
-      // Карточные загрузки в списке не видны — мержим, чтобы реордер хвоста
-      // не задвинул их в конец и не вытеснил активную
+      // Обложки и мелкое аудио не таскаются и в visible не попадают — мержим,
+      // чтобы реордер хвоста не задвинул их в конец и не вытеснил активную
       const full = lastJobs.filter((j) => isUnfinished(j.state) && !j.noQueue).map((j) => j.jobId);
       void chrome.runtime.sendMessage({ type: 'reorder-jobs', order: mergeVisibleOrder(full, visible) });
     });
@@ -895,7 +891,7 @@ function queueRow(job: JobInfo, withBar: boolean): HTMLLIElement {
 
   li.append(row);
 
-  if (job.state !== 'queued' && withBar) {
+  if (job.state !== 'queued') {
     const bar = document.createElement('div');
     bar.className = 'bar';
     const fill = document.createElement('div');
@@ -907,9 +903,6 @@ function queueRow(job: JobInfo, withBar: boolean): HTMLLIElement {
     bar.append(fill);
     li.append(bar);
     if (job.state !== 'paused') trackLive(job.jobId, { fill, label: state });
-  } else if (job.state !== 'queued' && job.state !== 'paused') {
-    // Без полоски цифры всё равно живые
-    trackLive(job.jobId, { label: state });
   }
 
   return li;
@@ -955,18 +948,18 @@ function finishedRow(job: JobInfo): HTMLLIElement {
   return li;
 }
 
-function renderJobs(matched: Set<string>): void {
+function renderJobs(): void {
   hasActiveJobs = lastJobs.some((j) => j.state === 'running' || j.state === 'starting' || j.state === 'queued');
   syncUpdateBtn();
-  // Очередь целиком, сверху вниз в порядке скачивания — по ней видно, кто
-  // качается и кто следующий. У карточных загрузок полоска на карточке,
-  // в строке — только цифры. Завершённые без карточки — хвостом
+  // Здесь живут все загрузки без исключений: очередь сверху вниз в порядке
+  // скачивания, завершённые хвостом. Карточки наверху не меняются, поэтому
+  // полоска нужна каждой активной строке
   const queue = lastJobs.filter((j) => isUnfinished(j.state));
-  const finished = lastJobs.filter((j) => !isUnfinished(j.state) && !matched.has(j.jobId));
+  const finished = lastJobs.filter((j) => !isUnfinished(j.state));
   jobsSection.hidden = queue.length === 0 && finished.length === 0;
   clearJobsBtn.hidden = finished.length === 0;
   jobsList.textContent = '';
-  for (const job of queue) jobsList.append(queueRow(job, !matched.has(job.jobId)));
+  for (const job of queue) jobsList.append(queueRow(job));
   for (const job of finished) jobsList.append(finishedRow(job));
 }
 
@@ -983,6 +976,7 @@ async function refresh(): Promise<void> {
   const jobs: JobInfo[] = res?.jobs ?? [];
   const jobsKind = diffJobs(lastJobs, jobs);
   lastJobs = jobs;
+  resolvePending(jobs);
   // Перерисовка стирает CSS-переходы и мигает превью — делаем её только
   // когда реально изменился состав карточек, а не цифры прогресса
   const snap = JSON.stringify([pageThumb, pageVideos, lastItems]);
@@ -1003,6 +997,7 @@ async function init(): Promise<void> {
       const jobs: JobInfo[] = msg.jobs ?? [];
       const kind = diffJobs(lastJobs, jobs);
       lastJobs = jobs;
+      resolvePending(jobs);
       if (kind === 'progress') {
         for (const j of jobs) updateJobProgress(j);
       } else if (kind === 'structural') {
