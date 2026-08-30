@@ -883,8 +883,11 @@ async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
       { label: 'Другого качества нет', run: () => undefined, note: true },
     ]);
     window.setTimeout(closeMenu, 1600);
+    return;
   }
-  if (res?.ok) markTaken(sentUrl ?? t.postUrl);
+  // Галку ставим по факту загрузки, а не по успеху запроса: ответ «вариантов
+  // нет» тоже приходит с ok, и рамка зеленела там, где ничего не качалось
+  if (res?.ok && res.jobId) markTaken(sentUrl ?? t.postUrl);
 }
 
 function setPicker(on: boolean): void {
