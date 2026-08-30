@@ -303,12 +303,13 @@ function ui(): ShadowRoot {
     '.tag { position: absolute; top: -11px; left: -2px; padding: 1px 6px; border-radius: 5px;',
     "  background: #f5c518; color: #1b1c20; font: 600 11px/1.5 'Downy Golos', system-ui, sans-serif; white-space: nowrap; }",
     '.frame.taken .tag { background: #22c55e; color: #fff; }',
-    '.menu { position: fixed; min-width: 218px; max-width: 320px; overflow: hidden;',
+    '.menu { position: fixed; min-width: 168px; max-width: 320px; overflow: hidden;',
     '  padding: 4px; border: 1px solid #e3e4e8;',
     '  border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(20, 20, 25, .18);',
     "  font: 400 13px/1.4 'Downy Golos', system-ui, sans-serif; pointer-events: auto; }",
     /* Пункт с двумя зонами: слева действие, справа — что именно скачается */
-    '.split { display: flex; align-items: stretch; border-radius: 6px; overflow: hidden; }',
+    /* Ширину просит сама строка: меню с одним «Пробив…» должно быть узким */
+    '.split { display: flex; align-items: stretch; border-radius: 6px; overflow: hidden; min-width: 210px; }',
     '.split:hover { background: #ececef; }',
     '.split .main { flex: 1 1 auto; width: auto; min-width: 0; padding: 6px 10px; border: none; background: none;',
     '  font: inherit; text-align: left; cursor: pointer; color: #1b1c20;',
@@ -321,10 +322,17 @@ function ui(): ShadowRoot {
     '.menu > button { display: block; width: 100%; padding: 6px 10px; border: none; border-radius: 6px;',
     '  background: none; color: #1b1c20; font: inherit; text-align: left; cursor: pointer; }',
     '.menu > button:hover { background: #ececef; }',
+    '.menu > .busy { display: flex; align-items: center; gap: 7px; color: #6e7278; cursor: default; }',
+    '.menu > .busy:hover { background: none; }',
+    '.busy-spin { flex: none; width: 12px; height: 12px; border-radius: 50%;',
+    '  border: 2px solid #ececef; border-top-color: #f5c518; animation: spin .7s linear infinite; }',
     '@media (prefers-color-scheme: dark) {',
     '  .menu { background: #262a33; border-color: #363b47; }',
     '  .menu > button { color: #f2f3f5; }',
     '  .menu > button:hover { background: #313642; }',
+    '  .menu > .busy { color: #a3a9b4; }',
+    '  .menu > .busy:hover { background: none; }',
+    '  .busy-spin { border-color: #313642; border-top-color: #f5c518; }',
     '  .split .main { color: #f2f3f5; }',
     '  .split:hover { background: #313642; }',
     '  .split .more { border-left-color: #414857; background: #2f3540; color: #f2f3f5; }',
@@ -557,6 +565,8 @@ function drawFrame(t: PickTarget | null): void {
 }
 
 function closeMenu(): void {
+  window.clearInterval(busyTimer);
+  busyTimer = 0;
   menuEl?.remove();
   menuEl = null;
 }
@@ -569,6 +579,8 @@ interface MenuItem {
   run: () => void;
   /** Вторая зона справа: подпись (какое качество возьмём) и своё действие */
   aside?: { hint: string; run: () => void };
+  /** Ждём разведку: пункт не нажимается, при нём крутится спиннер */
+  busy?: boolean;
 }
 
 /** Правая зона пункта, если она есть — иначе обычная строка меню */
@@ -578,6 +590,18 @@ function menuRow(item: MenuItem): HTMLElement {
     log(`выбрали в меню: ${label}`);
     run();
   };
+
+  if (item.busy) {
+    const btn = document.createElement('button');
+    btn.className = 'busy';
+    btn.disabled = true;
+    const spin = document.createElement('span');
+    spin.className = 'busy-spin';
+    const text = document.createElement('span');
+    text.textContent = item.label;
+    btn.append(spin, text);
+    return btn;
+  }
 
   if (!item.aside) {
     const btn = document.createElement('button');
@@ -622,16 +646,29 @@ function openMenu(x: number, y: number, items: MenuItem[]): void {
   const root = ui();
   menuEl = document.createElement('div');
   menuEl.className = 'menu';
-  menuEl.style.left = `${Math.max(4, Math.min(x, window.innerWidth - 240))}px`;
-  menuEl.style.top = `${Math.max(4, Math.min(y, window.innerHeight - 24 - items.length * 30))}px`;
+  menuEl.style.left = `${x}px`;
+  menuEl.style.top = `${y}px`;
   for (const item of items) menuEl.append(menuRow(item));
   root.append(menuEl);
+  // Размер известен только после вставки — по нему и держим меню в экране
+  const box = menuEl.getBoundingClientRect();
+  menuEl.style.left = `${Math.max(4, Math.min(x, window.innerWidth - box.width - 8))}px`;
+  menuEl.style.top = `${Math.max(4, Math.min(y, window.innerHeight - box.height - 8))}px`;
   log(`меню: ${items.map((i) => i.label).join(' / ')}`);
 }
 
-/** Заглушка на время ожидания: меню уже открыто, пусть говорит, чего ждём */
-function showBusy(text: string): void {
-  openMenu(lastMenuAt.x, lastMenuAt.y, [{ label: text, run: () => undefined }]);
+let busyTimer = 0;
+
+/** Ожидание разведки. Слово и бегущие точки — те же, что в попапе: там это
+ *  состояние уже называется «Пробив», и двух названий у него быть не должно. */
+function showBusy(): void {
+  openMenu(lastMenuAt.x, lastMenuAt.y, [{ label: 'Пробив', run: () => undefined, busy: true }]);
+  let dots = 0;
+  busyTimer = window.setInterval(() => {
+    dots = (dots + 1) % 4;
+    const el = menuEl?.querySelector('.busy span:last-child');
+    if (el) el.textContent = `Пробив${'.'.repeat(dots)}`;
+  }, 400);
 }
 
 /** Качества видео — их присылает фон, когда вариантов больше одного */
@@ -757,7 +794,7 @@ function markTaken(key: string | undefined): void {
 
 async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
   const sentUrl = opts.url ?? t.url;
-  if (opts.wantVariants) showBusy('Ищу качества…');
+  if (opts.wantVariants) showBusy();
   const res = await chrome.runtime.sendMessage({
     type: 'pick',
     kind: opts.kind ?? t.kind,
