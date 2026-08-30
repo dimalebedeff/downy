@@ -1012,7 +1012,11 @@ async function handlePick(
   const maxHeight = msg.variantUrl ? Number(msg.variantUrl) : undefined;
   // В имя файла идёт «1080p60» — без веса, который висит в подписи меню
   const qualityLabel = msg.variantLabel?.split(' · ')[0];
-  const res = await startYtdlpJob(pageUrl, msg.pageTitle, streams, maxHeight, qualityLabel);
+  // Заголовок вкладки годится, только когда качаем её же. Из ленты уходит
+  // адрес чужого ролика, и «(9) YouTube» стало бы именем всем подряд —
+  // пусть yt-dlp сам подставит настоящее название
+  const title = pageUrl === msg.pageUrl ? msg.pageTitle : undefined;
+  const res = await startYtdlpJob(pageUrl, title, streams, maxHeight, qualityLabel);
   if (res.ok) bumpPicked(tabId);
   return res;
 }
