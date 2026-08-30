@@ -595,7 +595,9 @@ function pingCoApp(): Promise<{ ok: boolean; info?: PongEvent; error?: string }>
       clearTimeout(timer);
       resolve(res);
     };
-    const timer = setTimeout(() => done({ ok: false, error: 'CoApp не ответил за 3 секунды' }), 3000);
+    // Хост однопоточный: пока он парсит плейлист или разбирает вывод yt-dlp,
+    // ответ на ping ждёт своей очереди. Три секунды тут ловили живого помощника
+    const timer = setTimeout(() => done({ ok: false, error: 'CoApp не ответил за 8 секунд' }), 8000);
     pendingPings.add(done);
     const sent = sendToCoApp({ type: 'ping' });
     if (!sent.ok) done({ ok: false, error: sent.error ?? 'CoApp не установлен' });

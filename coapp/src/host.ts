@@ -68,6 +68,22 @@ function rotateLog(): void {
 
 rotateLog();
 
+/** Проверка версий поднимает два процесса, и yt-dlp (PyInstaller) каждый раз
+ *  распаковывается ~1,4 с. spawnSync блокирует хост целиком, поэтому на каждый
+ *  ping попап рисковал не дождаться ответа и объявить помощника мёртвым — даже
+ *  когда загрузки прекрасно шли. Бинарники в работе не меняются: проверяем
+ *  один раз, а после обновления сбрасываем. */
+let binsChecked: { ffmpeg: boolean; ytdlp: boolean } | null = null;
+
+function binsState(): { ffmpeg: boolean; ytdlp: boolean } {
+  if (!binsChecked) {
+    const started = Date.now();
+    binsChecked = { ffmpeg: binWorks(ffmpegPath, '-version'), ytdlp: binWorks(ytdlpPath, '--version') };
+    log('bins checked in', Date.now() - started, 'ms:', JSON.stringify(binsChecked));
+  }
+  return binsChecked;
+}
+
 const engine = createYtdlpEngine({ binDir, log });
 const { ffmpegPath, ytdlpPath } = engine;
 
@@ -795,6 +811,8 @@ async function runUpdate(req: UpdateRequest): Promise<void> {
     const ytdlpErr = await runStep(ytdlpPath, ['-U'], installRoot);
     if (ytdlpErr) log('update: yt-dlp -U failed (non-fatal):', ytdlpErr.slice(-300));
 
+    // Обновление перекачивает ffmpeg/yt-dlp — прежний вердикт о них протух
+    binsChecked = null;
     log('update done', req.tag);
     emitUpdate('done');
   } catch (e) {
@@ -835,15 +853,17 @@ readMessages((raw) => {
     log('recv', JSON.stringify(msg).slice(0, 300));
   }
   switch (msg.type) {
-    case 'ping':
+    case 'ping': {
+      const bins = binsState();
       sendMessage({
         type: 'pong',
         version: VERSION,
-        ffmpeg: binWorks(ffmpegPath, '-version'),
-        ytdlp: binWorks(ytdlpPath, '--version'),
+        ffmpeg: bins.ffmpeg,
+        ytdlp: bins.ytdlp,
         defaultOutDir,
       });
       break;
+    }
     case 'pick_dir':
       pickDir(msg);
       break;
