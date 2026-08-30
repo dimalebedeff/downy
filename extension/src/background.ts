@@ -559,8 +559,36 @@ function getCoAppPort(): chrome.runtime.Port {
   return port;
 }
 
+/** Загрузки, начатые прямо со страницы (прицел, контекстное меню). Попап при
+ *  этом закрыт, поэтому о ходе дела странице рассказываем отдельно — иначе
+ *  клик выглядит так, будто ничего не произошло. */
+const pageJobs = new Map<number, Set<string>>();
+
+function trackPageJob(tabId: number, jobId: string): void {
+  const ids = pageJobs.get(tabId) ?? new Set<string>();
+  ids.add(jobId);
+  pageJobs.set(tabId, ids);
+}
+
+function pushPageJobs(): void {
+  for (const [tabId, ids] of [...pageJobs]) {
+    const mine = jobList().filter((j) => ids.has(j.jobId));
+    if (mine.length === 0) {
+      pageJobs.delete(tabId);
+      continue;
+    }
+    void chrome.tabs.sendMessage(tabId, { type: 'page-jobs', jobs: mine }).catch(() => {});
+    // Завершённое отправили — дальше о нём рассказывать нечего
+    for (const job of mine) {
+      if (!isUnfinished(job.state)) ids.delete(job.jobId);
+    }
+    if (ids.size === 0) pageJobs.delete(tabId);
+  }
+}
+
 function broadcastJobs(): void {
   void chrome.runtime.sendMessage({ type: 'jobs-updated', jobs: jobList() }).catch(() => {});
+  pushPageJobs();
 }
 
 /** Событие расширения в общий coapp.log. Порт намеренно не поднимаем: логи —
@@ -997,7 +1025,10 @@ async function handlePick(
       pageTitle: imageStem(msg.url, msg.pageTitle),
     };
     const res = await startDirectJob(item, 'both');
-    if (res.ok) bumpPicked(tabId);
+    if (res.ok) {
+      bumpPicked(tabId);
+      if (res.jobId) trackPageJob(tabId, res.jobId);
+    }
     return res;
   }
 
@@ -1026,7 +1057,10 @@ async function handlePick(
       item.kind === 'direct'
         ? await startDirectJob(item, streams)
         : await startHlsJob(item, msg.variantUrl, msg.variantLabel, streams);
-    if (res.ok) bumpPicked(tabId);
+    if (res.ok) {
+      bumpPicked(tabId);
+      if (res.jobId) trackPageJob(tabId, res.jobId);
+    }
     return res;
   }
 
@@ -1050,7 +1084,10 @@ async function handlePick(
   // пусть yt-dlp сам подставит настоящее название
   const title = pageUrl === msg.pageUrl ? msg.pageTitle : undefined;
   const res = await startYtdlpJob(pageUrl, title, streams, maxHeight, qualityLabel);
-  if (res.ok) bumpPicked(tabId);
+  if (res.ok) {
+    bumpPicked(tabId);
+    if (res.jobId) trackPageJob(tabId, res.jobId);
+  }
   return res;
 }
 

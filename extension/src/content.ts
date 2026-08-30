@@ -256,7 +256,7 @@ function ui(): ShadowRoot {
     '.tag { position: absolute; top: -11px; left: -2px; padding: 1px 6px; border-radius: 5px;',
     '  background: #f5c518; color: #1b1c20; font: 600 11px/1.5 system-ui, sans-serif; white-space: nowrap; }',
     '.frame.taken .tag { background: #22c55e; color: #fff; }',
-    '.panel { position: fixed; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px;',
+    '.panel { display: flex; align-items: center; gap: 8px;',
     '  padding: 8px 12px; border-radius: 10px; background: #1b1c20; color: #f2f3f5;',
     '  font: 600 12.5px/1.4 system-ui, sans-serif; box-shadow: 0 8px 28px rgba(0, 0, 0, .38); pointer-events: none; }',
     '.panel b { color: #f5c518; }',
@@ -271,6 +271,41 @@ function ui(): ShadowRoot {
     '  .menu { background: #262a33; border-color: #363b47; }',
     '  .menu button { color: #f2f3f5; }',
     '  .menu button:hover { background: #313642; }',
+    '}',
+    /* Уголок: сверху тосты загрузок, снизу плашка прицела */
+    '.corner { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column;',
+    '  align-items: flex-end; gap: 8px; pointer-events: none; max-width: 320px; }',
+    '.tt { min-width: 226px; max-width: 300px; border-radius: 12px; overflow: hidden;',
+    '  background: #fff; color: #1b1c20; border: 1px solid #e3e4e8;',
+    '  box-shadow: 0 6px 22px rgba(15, 17, 22, .2);',
+    '  animation: ttIn .2s cubic-bezier(.2, .8, .3, 1) both; }',
+    '.tt.out { animation: ttOut .2s ease forwards; }',
+    '@keyframes ttIn { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }',
+    '@keyframes ttOut { to { opacity: 0; transform: translateY(4px) scale(.98); } }',
+    '.tt-row { display: flex; align-items: center; gap: 8px; padding: 8px 11px; }',
+    '.tt-icon { flex: none; font-size: 12px; color: #94740a; }',
+    '.tt-name { flex: 1; min-width: 0; font-size: 12px; font-weight: 600;',
+    '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+    '.tt-state { flex: none; font-size: 11px; color: #6e7278; font-variant-numeric: tabular-nums; }',
+    '.tt-state.ok { color: #94740a; font-weight: 700; }',
+    '.tt-state.err { color: #dc2626; font-weight: 700; }',
+    '.tt-spin { flex: none; width: 12px; height: 12px; border-radius: 50%;',
+    '  border: 2px solid #ececef; border-top-color: #f5c518; animation: spin .7s linear infinite; }',
+    '.tt-bar { height: 3px; background: #ececef; }',
+    '.tt-fill { height: 100%; width: 0; background: #f5c518; box-shadow: 0 0 8px rgba(245, 197, 24, .5);',
+    '  transition: width .25s linear; }',
+    '.tt-fill.idle { width: 35%; animation: ttSlide 1.4s ease-in-out infinite alternate; }',
+    '@keyframes ttSlide { from { margin-left: 0; } to { margin-left: 65%; } }',
+    '@media (prefers-color-scheme: dark) {',
+    '  .tt { background: #262a33; color: #f2f3f5; border-color: #363b47; }',
+    '  .tt-state { color: #a3a9b4; }',
+    '  .tt-state.ok, .tt-icon { color: #f5c518; }',
+    '  .tt-bar { background: #313642; }',
+    '  .tt-spin { border-color: #313642; border-top-color: #f5c518; }',
+    '}',
+    '@media (prefers-reduced-motion: reduce) {',
+    '  .tt, .tt.out { animation: none; }',
+    '  .tt-spin, .tt-fill.idle { animation: none; }',
     '}',
   ].join('\n');
   shadow.append(style);
@@ -431,11 +466,11 @@ function drawFrame(t: PickTarget | null): void {
 
 function drawPanel(count: number): void {
   if (!TOP_FRAME) return;
-  const root = ui();
   if (!panelEl) {
     panelEl = document.createElement('div');
     panelEl.className = 'panel';
-    root.append(panelEl);
+    // Всегда нижняя строка уголка: тосты копятся над ней
+    cornerBox().append(panelEl);
   }
   panelEl.textContent = '';
   const title = document.createElement('b');
@@ -630,7 +665,184 @@ for (const event of ['scroll', 'resize'] as const) {
   );
 }
 
-chrome.runtime.onMessage.addListener((msg: { type?: string; on?: boolean; count?: number }) => {
-  if (msg?.type === 'picker') setPicker(!!msg.on);
-  else if (msg?.type === 'picker-count' && pickerOn) drawPanel(msg.count ?? 0);
-});
+chrome.runtime.onMessage.addListener(
+  (msg: { type?: string; on?: boolean; count?: number; jobs?: PageJob[] }) => {
+    if (msg?.type === 'picker') setPicker(!!msg.on);
+    else if (msg?.type === 'picker-count' && pickerOn) drawPanel(msg.count ?? 0);
+    // Тосты живут и после выхода из прицела: загрузка идёт своим ходом
+    else if (msg?.type === 'page-jobs' && TOP_FRAME) {
+      for (const job of msg.jobs ?? []) updateToast(job);
+    }
+  },
+);
+
+// ---------- Тосты: что происходит с загрузкой, начатой со страницы ----------
+//
+// Попап в этот момент закрыт, и без тоста клик прицелом выглядит так, будто
+// ничего не произошло. Короткая загрузка успевает только объявить о старте:
+// держать «готово» на экране ради картинки на два мегабайта незачем.
+
+/** Дольше этого — результат стоит показать: человек уже забыл, что качал */
+const TOAST_LONG_MS = 10_000;
+/** Больше не помещается по-человечески: старые завершённые уступают место */
+const TOAST_MAX = 4;
+
+interface Toast {
+  node: HTMLDivElement;
+  state: HTMLSpanElement;
+  bar: HTMLDivElement;
+  fill: HTMLDivElement;
+  spin: HTMLSpanElement;
+  startedAt: number;
+  finished: boolean;
+}
+
+const toasts = new Map<string, Toast>();
+
+function fmtBytes(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '';
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2).replace('.', ',')} ГБ`;
+  if (mb >= 10) return `${Math.round(mb)} МБ`;
+  return `${mb.toFixed(1).replace('.', ',')} МБ`;
+}
+
+function cornerBox(): HTMLDivElement {
+  const root = ui();
+  let box = root.querySelector<HTMLDivElement>('.corner');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'corner';
+    root.append(box);
+  }
+  return box;
+}
+
+function toastIcon(kind?: string): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.className = 'tt-icon';
+  span.textContent = kind === 'image' ? '🖼' : kind === 'audio' ? '♪' : '▶';
+  return span;
+}
+
+function makeToast(job: PageJob): Toast {
+  const node = document.createElement('div');
+  node.className = 'tt';
+
+  const row = document.createElement('div');
+  row.className = 'tt-row';
+
+  const name = document.createElement('span');
+  name.className = 'tt-name';
+  name.textContent = job.label;
+  name.title = job.label;
+
+  const spin = document.createElement('span');
+  spin.className = 'tt-spin';
+
+  const state = document.createElement('span');
+  state.className = 'tt-state';
+  state.textContent = 'запускаю';
+
+  row.append(toastIcon(job.mediaKind), name, spin, state);
+
+  const bar = document.createElement('div');
+  bar.className = 'tt-bar';
+  const fill = document.createElement('div');
+  fill.className = 'tt-fill';
+  bar.append(fill);
+
+  node.append(row, bar);
+  // Свежий тост сверху стопки, плашка прицела всегда остаётся внизу
+  const box = cornerBox();
+  box.insertBefore(node, box.firstChild);
+
+  return { node, state, bar, fill, spin, startedAt: Date.now(), finished: false };
+}
+
+function dropToast(jobId: string, after: number): void {
+  const t = toasts.get(jobId);
+  if (!t) return;
+  window.setTimeout(() => {
+    t.node.classList.add('out');
+    window.setTimeout(() => {
+      t.node.remove();
+      toasts.delete(jobId);
+    }, 200);
+  }, after);
+}
+
+/** Стопка не должна расти бесконечно: пачку в двадцать картинок не прочесть */
+function trimToasts(): void {
+  const done = [...toasts.entries()].filter(([, t]) => t.finished);
+  while (toasts.size > TOAST_MAX && done.length > 0) {
+    const [id, t] = done.shift()!;
+    t.node.remove();
+    toasts.delete(id);
+  }
+}
+
+function updateToast(job: PageJob): void {
+  if (job.state === 'canceled') {
+    const t = toasts.get(job.jobId);
+    if (t) {
+      t.node.remove();
+      toasts.delete(job.jobId);
+    }
+    return;
+  }
+
+  let t = toasts.get(job.jobId);
+  if (!t) {
+    t = makeToast(job);
+    toasts.set(job.jobId, t);
+    trimToasts();
+  }
+  if (t.finished) return;
+
+  if (job.state === 'queued') {
+    t.state.textContent = 'в очереди';
+    return;
+  }
+
+  if (job.state === 'running' || job.state === 'starting') {
+    t.spin.remove();
+    const ratio = job.progress ?? (job.totalBytes ? (job.bytes ?? 0) / job.totalBytes : null);
+    if (ratio != null) {
+      t.fill.style.width = `${Math.round(ratio * 100)}%`;
+      t.state.textContent = `${Math.round(ratio * 100)}%`;
+    } else {
+      t.fill.classList.add('idle');
+      t.state.textContent = fmtBytes(job.bytes) || 'качаю';
+    }
+    return;
+  }
+
+  // Готово или ошибка — дальше тост только уезжает
+  t.finished = true;
+  t.spin.remove();
+  t.bar.remove();
+  const quick = Date.now() - t.startedAt < TOAST_LONG_MS;
+  if (job.state === 'done') {
+    t.state.className = 'tt-state ok';
+    t.state.textContent = `✓ ${fmtBytes(job.bytes) || 'готово'}`;
+    // Быстрая загрузка сама себе уведомление о старте: показали и убрали
+    dropToast(job.jobId, quick ? 900 : 4500);
+  } else {
+    t.state.className = 'tt-state err';
+    t.state.textContent = 'ошибка';
+    t.node.title = job.message ?? '';
+    dropToast(job.jobId, 6000);
+  }
+}
+
+interface PageJob {
+  jobId: string;
+  label: string;
+  state: string;
+  progress: number | null;
+  bytes?: number;
+  totalBytes?: number;
+  mediaKind?: string;
+  message?: string;
+}
