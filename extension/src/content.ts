@@ -421,7 +421,13 @@ function setCursor(on: boolean): void {
   document.documentElement.classList.toggle('downy-picking', on);
 }
 
+/** Зажатый Alt снимает порог: иногда нужна именно мелочь — значок, стикер,
+ *  крошечная анимация. Порог существует, чтобы прицел не цеплялся за иконки
+ *  интерфейса, поэтому снимаем его только пока клавиша нажата. */
+let greedy = false;
+
 function bigEnough(el: Element): boolean {
+  if (greedy) return true;
   const r = el.getBoundingClientRect();
   return r.width >= MIN_PICK_SIZE && r.height >= MIN_PICK_SIZE;
 }
@@ -542,7 +548,8 @@ function frameLabel(t: PickTarget): string {
     // под курсором мелкая обложка, а не полноразмерный снимок
     const img = t.el instanceof HTMLImageElement ? t.el : null;
     const size = img?.naturalWidth ? ` ${img.naturalWidth}×${img.naturalHeight}` : '';
-    return t.postUrl ? `картинка${size} — или ролик` : `картинка${size}`;
+    if (t.postUrl) return `картинка${size} — или ролик`;
+    return greedy ? `мелочь${size}` : `картинка${size}`;
   }
   // Ленты бывают такие, что пост у видео не опознать — честнее сказать заранее
   if (!t.url && !t.postUrl) return 'не понять, из какого поста ролик';
@@ -941,6 +948,7 @@ document.addEventListener(
     requestAnimationFrame(() => {
       moveScheduled = false;
       if (!pickerOn || menuEl) return;
+      lastPoint = { x: clientX, y: clientY };
       const t = pickAt(clientX, clientY);
       // Тот же элемент — рамка уже на месте, лишний раз не дёргаем
       if (t?.el === hovered?.el) return;
@@ -979,6 +987,29 @@ document.addEventListener(
   },
   true,
 );
+
+/** Пересчитать мишень под курсором: Alt мог изменить, что считается добычей */
+let lastPoint = { x: 0, y: 0 };
+function refreshHover(): void {
+  if (!pickerOn || menuEl) return;
+  const t = pickAt(lastPoint.x, lastPoint.y);
+  hovered = t;
+  drawFrame(t);
+}
+
+for (const type of ['keydown', 'keyup'] as const) {
+  document.addEventListener(
+    type,
+    (e) => {
+      if (!pickerOn) return;
+      const next = (e as KeyboardEvent).altKey;
+      if (next === greedy) return;
+      greedy = next;
+      refreshHover();
+    },
+    true,
+  );
+}
 
 document.addEventListener(
   'keydown',
@@ -1073,7 +1104,7 @@ function syncHead(): void {
     countEl.hidden = n === 0;
   }
   // Про правый клик иначе никто не узнает: подсказка живёт там же, где режим
-  if (hintEl) hintEl.textContent = pickerOn ? 'ПКМ — варианты · ESC — выход' : '';
+  if (hintEl) hintEl.textContent = pickerOn ? 'ПКМ — варианты · Alt — мелочь · ESC' : '';
 }
 
 function panel(): HTMLDivElement {
