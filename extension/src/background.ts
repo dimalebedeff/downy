@@ -426,6 +426,20 @@ const pendingMediaProbes = new Map<string, (results: ProbedMedia[]) => void>();
 const probeCache = new Map<string, ProbeState>();
 const pendingProbes = new Map<string, string>(); // reqId -> pageUrl
 
+/** Разведка форматов идёт секунды; столько прицел готов ждать ради качеств */
+const PROBE_WAIT_MS = 9000;
+
+/** Дождаться готовой разведки — её могли и не заказывать до этого клика */
+async function awaitProbe(pageUrl: string): Promise<ProbeState> {
+  let state = ensureProbe(pageUrl);
+  const until = Date.now() + PROBE_WAIT_MS;
+  while (state.status === 'pending' && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 250));
+    state = probeCache.get(pageUrl) ?? state;
+  }
+  return state;
+}
+
 /** Запускает разведку, если её ещё не было; отвечает текущим состоянием. */
 function ensureProbe(pageUrl: string): ProbeState {
   const cached = probeCache.get(pageUrl);
@@ -934,6 +948,8 @@ interface PickMessage {
   streams?: StreamSelection;
   /** Выбор уже сделан в меню на странице — спрашивать второй раз нечего */
   chosen?: boolean;
+  /** Человек попросил варианты через правый клик — ради них можно и подождать */
+  wantVariants?: boolean;
   pageUrl?: string;
   pageTitle?: string;
 }
@@ -1121,6 +1137,13 @@ async function handlePick(
     return { ok: false, error: 'Не нашёл, к какому посту относится ролик — открой пост и качай оттуда' };
   }
   if (!picked) {
+    // Попап заказывает разведку заранее, а клик по странице её опережает.
+    // Ждём только когда варианты попросили явно: обычный клик должен быть
+    // мгновенным, даже ценой «лучшего до 1080p» без выбора
+    if (msg.wantVariants) {
+      const probed = await awaitProbe(pageUrl);
+      if (probed.status === 'pending') log('page', 'разведка качеств не успела');
+    }
     const variants = pickVariants(undefined, pageUrl);
     if (variants.length) return { ok: true, variants };
   }

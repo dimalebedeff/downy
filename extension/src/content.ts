@@ -240,6 +240,8 @@ interface PickVariant {
 
 interface SendOpts {
   url?: string;
+  /** Ради качеств готовы подождать разведку — так просит правый клик */
+  wantVariants?: boolean;
   variantUrl?: string;
   variantLabel?: string;
   streams?: string;
@@ -542,8 +544,11 @@ function closeMenu(): void {
 }
 
 /** Меню у курсора. Появляется только там, где есть из чего выбирать */
+let lastMenuAt = { x: 0, y: 0 };
+
 function openMenu(x: number, y: number, items: { label: string; run: () => void }[]): void {
   closeMenu();
+  lastMenuAt = { x, y };
   const root = ui();
   menuEl = document.createElement('div');
   menuEl.className = 'menu';
@@ -562,6 +567,11 @@ function openMenu(x: number, y: number, items: { label: string; run: () => void 
   }
   root.append(menuEl);
   log(`меню: ${items.map((i) => i.label).join(' / ')}`);
+}
+
+/** Заглушка на время ожидания: меню уже открыто, пусть говорит, чего ждём */
+function showBusy(text: string): void {
+  openMenu(lastMenuAt.x, lastMenuAt.y, [{ label: text, run: () => undefined }]);
 }
 
 /** Качества видео — их присылает фон, когда вариантов больше одного */
@@ -619,7 +629,7 @@ function showAllOptions(t: PickTarget, x: number, y: number): void {
   if (t.kind === 'video') {
     const video: PickTarget = { ...t, altImageUrl: undefined };
     // Без chosen: где есть качества, фон вернёт их вторым меню
-    items.push({ label: 'Скачать видео', run: () => void send(video) });
+    items.push({ label: 'Скачать видео', run: () => void send(video, { wantVariants: true }) });
     items.push({ label: 'Только звук', run: () => void send(video, { streams: 'audio', chosen: true }) });
     const poster = posterOf(t);
     if (poster) {
@@ -636,7 +646,7 @@ function showAllOptions(t: PickTarget, x: number, y: number): void {
     if (t.postUrl) {
       items.push({
         label: 'Скачать видео',
-        run: () => void send({ el: t.el, kind: 'video', postUrl: t.postUrl }),
+        run: () => void send({ el: t.el, kind: 'video', postUrl: t.postUrl }, { wantVariants: true }),
       });
     }
   }
@@ -667,6 +677,7 @@ function markTaken(key: string | undefined): void {
 
 async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
   const sentUrl = opts.url ?? t.url;
+  if (opts.wantVariants) showBusy('Ищу качества…');
   const res = await chrome.runtime.sendMessage({
     type: 'pick',
     kind: opts.kind ?? t.kind,
@@ -676,6 +687,7 @@ async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
     variantLabel: opts.variantLabel,
     streams: opts.streams,
     chosen: opts.chosen,
+    wantVariants: opts.wantVariants,
     pageUrl: location.href,
     pageTitle: document.title,
   });
@@ -686,6 +698,8 @@ async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
     showMenu(variants, t, r.left + 12, r.top + 12);
     return;
   }
+  // Ждали качества, а их нет — убираем заглушку, загрузка уже пошла
+  if (opts.wantVariants) closeMenu();
   if (res?.ok) markTaken(sentUrl ?? t.postUrl);
 }
 
