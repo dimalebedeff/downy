@@ -604,9 +604,26 @@ function setPicker(on: boolean): void {
   }
 }
 
-function leavePicker(): void {
+function leavePicker(why: string): void {
+  log(`выходим из прицела: ${why}`);
   setPicker(false);
   void chrome.runtime.sendMessage({ type: 'picker-off' }).catch(() => {});
+}
+
+// Сайт не должен ничего успеть по нашему клику: озон открывает галерею уже
+// по pointerdown, и его переход гасил прицел прямо под руками
+for (const type of ['pointerdown', 'mousedown', 'mouseup', 'auxclick'] as const) {
+  document.addEventListener(
+    type,
+    (e) => {
+      if (!pickerOn) return;
+      const point = e as MouseEvent;
+      if (menuEl && hits(menuEl, point.clientX, point.clientY)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
 }
 
 // Поиск мишени лазает по DOM — на каждый пиксель движения это слишком дорого
@@ -646,8 +663,7 @@ document.addEventListener(
     const t = pickAt(e.clientX, e.clientY);
     // Клик мимо медиа — выходим: страница должна вернуться к хозяину
     if (!t) {
-      log('клик мимо медиа — выходим из прицела');
-      leavePicker();
+      leavePicker('клик мимо медиа');
       return;
     }
     hovered = t;
@@ -667,7 +683,7 @@ document.addEventListener(
     if (!pickerOn || e.key !== 'Escape') return;
     e.preventDefault();
     e.stopPropagation();
-    leavePicker();
+    leavePicker('нажат ESC');
   },
   true,
 );

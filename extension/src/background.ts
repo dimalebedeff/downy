@@ -234,7 +234,7 @@ function clearTab(tabId: number): void {
   // Новая страница — новый контент-скрипт, и прицел в нём выключен. Не забыть
   // об этом здесь значило бы, что первый Alt+Shift+D после F5 «выключает»
   // то, чего уже нет, и режим включается лишь со второго нажатия
-  pickCounts.delete(tabId);
+  if (pickCounts.delete(tabId)) log('bg', `прицел сброшен навигацией, вкладка ${tabId}`);
   persist();
 }
 
@@ -933,10 +933,10 @@ function tellFrames(tabId: number, msg: unknown): void {
   void chrome.tabs.sendMessage(tabId, msg).catch(() => {});
 }
 
-function setPicker(tabId: number, on: boolean): void {
+function setPicker(tabId: number, on: boolean, why = ''): void {
   if (on) pickCounts.set(tabId, 0);
   else pickCounts.delete(tabId);
-  log('bg', `прицел ${on ? 'включён' : 'выключен'}, вкладка ${tabId}`);
+  log('bg', `прицел ${on ? 'включён' : 'выключен'}${why ? ` (${why})` : ''}, вкладка ${tabId}`);
   tellFrames(tabId, { type: 'picker', on });
 }
 
@@ -1099,7 +1099,7 @@ chrome.commands.onCommand.addListener((command) => {
   if (command !== 'toggle-picker') return;
   void (async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id != null) setPicker(tab.id, !pickCounts.has(tab.id));
+    if (tab?.id != null) setPicker(tab.id, !pickCounts.has(tab.id), 'хоткей');
   })();
 });
 
@@ -1249,13 +1249,13 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
       }
       case 'picker-off': {
         const tabId = sender.tab?.id;
-        if (tabId != null) setPicker(tabId, false);
+        if (tabId != null) setPicker(tabId, false, 'со страницы');
         sendResponse({ ok: true });
         break;
       }
       case 'toggle-picker': {
         const tabId = msg.tabId as number | undefined;
-        if (tabId != null) setPicker(tabId, !pickCounts.has(tabId));
+        if (tabId != null) setPicker(tabId, !pickCounts.has(tabId), 'из попапа');
         sendResponse({ ok: true });
         break;
       }
