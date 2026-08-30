@@ -5,6 +5,7 @@
 // по сети, а прицел отдаёт такие ролики yt-dlp по адресу поста.
 
 import { bestFromSrcset } from './lib/pick';
+import { fmtSize } from './lib/progress';
 
 interface DomMediaEntry {
   url: string;
@@ -312,8 +313,7 @@ function ui(): ShadowRoot {
     '.tt-bar { height: 3px; background: #ececef; }',
     '.tt-fill { height: 100%; width: 0; background: #f5c518; box-shadow: 0 0 8px rgba(245, 197, 24, .5);',
     '  transition: width .25s linear; }',
-    '.tt-fill.idle { width: 35%; animation: ttSlide 1.4s ease-in-out infinite alternate; }',
-    '@keyframes ttSlide { from { margin-left: 0; } to { margin-left: 65%; } }',
+    '.tt-bar[hidden] { display: none; }',
     '@media (prefers-color-scheme: dark) {',
     '  .tt { background: #262a33; color: #f2f3f5; border-color: #363b47; }',
     '  .tt-state { color: #a3a9b4; }',
@@ -323,7 +323,7 @@ function ui(): ShadowRoot {
     '}',
     '@media (prefers-reduced-motion: reduce) {',
     '  .tt, .tt.out { animation: none; }',
-    '  .tt-spin, .tt-fill.idle { animation: none; }',
+    '  .tt-spin { animation: none; }',
     '}',
   ].join('\n');
   shadow.append(style);
@@ -717,14 +717,6 @@ interface Toast {
 
 const toasts = new Map<string, Toast>();
 
-function fmtBytes(bytes?: number): string {
-  if (!bytes || bytes <= 0) return '';
-  const mb = bytes / (1024 * 1024);
-  if (mb >= 1024) return `${(mb / 1024).toFixed(2).replace('.', ',')} ГБ`;
-  if (mb >= 10) return `${Math.round(mb)} МБ`;
-  return `${mb.toFixed(1).replace('.', ',')} МБ`;
-}
-
 function cornerBox(): HTMLDivElement {
   const root = ui();
   let box = root.querySelector<HTMLDivElement>('.corner');
@@ -766,6 +758,7 @@ function makeToast(job: PageJob): Toast {
 
   const bar = document.createElement('div');
   bar.className = 'tt-bar';
+  bar.hidden = true;
   const fill = document.createElement('div');
   fill.className = 'tt-fill';
   bar.append(fill);
@@ -827,11 +820,13 @@ function updateToast(job: PageJob): void {
     t.spin.remove();
     const ratio = job.progress ?? (job.totalBytes ? (job.bytes ?? 0) / job.totalBytes : null);
     if (ratio != null) {
+      t.bar.hidden = false;
       t.fill.style.width = `${Math.round(ratio * 100)}%`;
       t.state.textContent = `${Math.round(ratio * 100)}%`;
     } else {
-      t.fill.classList.add('idle');
-      t.state.textContent = fmtBytes(job.bytes) || 'качаю';
+      // Долю ещё не знаем — полосе рисовать нечего, показываем скачанное
+      t.bar.hidden = true;
+      t.state.textContent = fmtSize(job.bytes) || 'качаю';
     }
     return;
   }
@@ -843,7 +838,7 @@ function updateToast(job: PageJob): void {
   const quick = Date.now() - t.startedAt < TOAST_LONG_MS;
   if (job.state === 'done') {
     t.state.className = 'tt-state ok';
-    t.state.textContent = `✓ ${fmtBytes(job.bytes) || 'готово'}`;
+    t.state.textContent = `✓ ${fmtSize(job.bytes) || 'готово'}`;
     // Быстрая загрузка сама себе уведомление о старте: показали и убрали
     dropToast(job.jobId, quick ? 900 : 4500);
   } else {

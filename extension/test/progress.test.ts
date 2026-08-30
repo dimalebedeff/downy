@@ -19,6 +19,12 @@ describe('fmtSize', () => {
     expect(fmtSize(12.3 * MB)).toBe('12.3 МБ');
     expect(fmtSize(2.5 * GB)).toBe('2.5 ГБ');
   });
+
+  it('мелкая картинка не превращается в «0.0 МБ»', () => {
+    // Обложка с озона весила 47 КБ, а тост показывал ноль
+    expect(fmtSize(47_674)).toBe('47 КБ');
+    expect(fmtSize(21_774)).toBe('21 КБ');
+  });
 });
 
 describe('jobProgressView', () => {
