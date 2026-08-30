@@ -58,9 +58,10 @@ describe('jobProgressView', () => {
     expect(v.ratio).toBe(0.42);
   });
 
-  it('ничего не известно: заглушка и неопределённая шкала', () => {
+  it('ничего не известно: молчим, шкала неопределённая', () => {
+    // Слова тут ничего не добавляют — на их месте крутится спиннер
     const v = jobProgressView({ progress: null });
-    expect(v.text).toBe('идёт…');
+    expect(v.text).toBe('');
     expect(v.ratio).toBeNull();
   });
 

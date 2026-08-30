@@ -940,13 +940,6 @@ function setPicker(tabId: number, on: boolean, why = ''): void {
   tellFrames(tabId, { type: 'picker', on });
 }
 
-function bumpPicked(tabId: number): void {
-  if (!pickCounts.has(tabId)) return;
-  const count = (pickCounts.get(tabId) ?? 0) + 1;
-  pickCounts.set(tabId, count);
-  tellFrames(tabId, { type: 'picker-count', count });
-}
-
 /** Качества для меню на странице. Пусто — выбирать не из чего, качаем сразу. */
 function pickVariants(item: MediaItem | undefined, pageUrl?: string): PickVariant[] {
   if (item?.variants && item.variants.length > 1) {
@@ -1029,10 +1022,7 @@ async function handlePick(
       pageTitle: imageStem(msg.url, msg.pageTitle),
     };
     const res = await startDirectJob(item, 'both');
-    if (res.ok) {
-      bumpPicked(tabId);
-      if (res.jobId) trackPageJob(tabId, res.jobId);
-    }
+    if (res.ok && res.jobId) trackPageJob(tabId, res.jobId);
     return res;
   }
 
@@ -1061,10 +1051,7 @@ async function handlePick(
       item.kind === 'direct'
         ? await startDirectJob(item, streams)
         : await startHlsJob(item, msg.variantUrl, msg.variantLabel, streams);
-    if (res.ok) {
-      bumpPicked(tabId);
-      if (res.jobId) trackPageJob(tabId, res.jobId);
-    }
+    if (res.ok && res.jobId) trackPageJob(tabId, res.jobId);
     return res;
   }
 
@@ -1088,10 +1075,7 @@ async function handlePick(
   // пусть yt-dlp сам подставит настоящее название
   const title = pageUrl === msg.pageUrl ? msg.pageTitle : undefined;
   const res = await startYtdlpJob(pageUrl, title, streams, maxHeight, qualityLabel);
-  if (res.ok) {
-    bumpPicked(tabId);
-    if (res.jobId) trackPageJob(tabId, res.jobId);
-  }
+  if (res.ok && res.jobId) trackPageJob(tabId, res.jobId);
   return res;
 }
 

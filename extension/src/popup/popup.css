@@ -492,6 +492,19 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
 .bar.paused .bar-fill { opacity: .45; }
 .bar.paused .bar-fill::after { display: none; }
 
+/* Спиннер на месте цифр, пока хост не сказал ни процентов, ни байтов */
+.row-spin {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--chip);
+  border-top-color: var(--accent);
+  animation: row-spin .7s linear infinite;
+}
+@keyframes row-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .row-spin { animation: none; } }
+
 .job-text { flex: none; font-size: 11px; color: var(--muted); white-space: nowrap; }
 .job-text.done { color: var(--ok); font-weight: 600; }
 .job-text.err { color: var(--err); }

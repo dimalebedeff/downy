@@ -5,7 +5,7 @@
 // по сети, а прицел отдаёт такие ролики yt-dlp по адресу поста.
 
 import { bestFromSrcset } from './lib/pick';
-import { fmtSize } from './lib/progress';
+import { fmtEta, fmtSize, fmtSpeed } from './lib/progress';
 import { typeIconSvg, type FileKind } from './lib/media-icon';
 
 interface DomMediaEntry {
@@ -275,11 +275,6 @@ function ui(): ShadowRoot {
     '.tag { position: absolute; top: -11px; left: -2px; padding: 1px 6px; border-radius: 5px;',
     "  background: #f5c518; color: #1b1c20; font: 600 11px/1.5 'Downy Golos', system-ui, sans-serif; white-space: nowrap; }",
     '.frame.taken .tag { background: #22c55e; color: #fff; }',
-    '.panel { display: flex; align-items: center; gap: 8px;',
-    '  padding: 8px 12px; border-radius: 10px; background: #1b1c20; color: #f2f3f5;',
-    "  font: 600 12.5px/1.4 'Downy Golos', system-ui, sans-serif; box-shadow: 0 8px 28px rgba(0, 0, 0, .38); pointer-events: none; }",
-    '.panel b { color: #f5c518; }',
-    '.panel span { font-weight: 400; opacity: .72; }',
     '.menu { position: fixed; min-width: 168px; padding: 4px; border: 1px solid #e3e4e8;',
     '  border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(20, 20, 25, .18);',
     "  font: 400 13px/1.4 'Downy Golos', system-ui, sans-serif; pointer-events: auto; }",
@@ -291,41 +286,61 @@ function ui(): ShadowRoot {
     '  .menu button { color: #f2f3f5; }',
     '  .menu button:hover { background: #313642; }',
     '}',
-    /* Уголок: сверху тосты загрузок, снизу плашка прицела */
+    /* Уголок: панель Downy — один объект вместо россыпи карточек */
     '.corner { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column;',
-    '  align-items: flex-end; gap: 8px; pointer-events: none; max-width: 320px; }',
-    '.tt { min-width: 226px; max-width: 300px; border-radius: 12px; overflow: hidden;',
-    "  font-family: 'Downy Golos', system-ui, 'Segoe UI', sans-serif;",
+    '  align-items: stretch; gap: 8px; width: 296px; max-width: calc(100vw - 28px); }',
+    '.panel { pointer-events: auto; border-radius: 12px; overflow: hidden;',
     '  background: #fff; color: #1b1c20; border: 1px solid #e3e4e8;',
     '  box-shadow: 0 6px 22px rgba(15, 17, 22, .2);',
     '  animation: ttIn .2s cubic-bezier(.2, .8, .3, 1) both; }',
-    '.tt.out { animation: ttOut .2s ease forwards; }',
+    '.panel.out { animation: ttOut .2s ease forwards; }',
     '@keyframes ttIn { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }',
     '@keyframes ttOut { to { opacity: 0; transform: translateY(4px) scale(.98); } }',
-    '.tt-row { display: flex; align-items: center; gap: 8px; padding: 8px 11px; }',
-    '.tt-icon { flex: none; display: inline-flex; align-items: center; color: #94740a; }',
-    '.tt-icon svg { display: block; }',
-    '.tt-name { flex: 1; min-width: 0; font-size: 12px; font-weight: 600;',
+    '.p-head { display: flex; align-items: center; gap: 8px; padding: 7px 11px;',
+    '  border-bottom: 1px solid #e3e4e8; font-size: 12.5px; font-weight: 700; }',
+    '.p-hint { flex: 1; font-size: 10.5px; font-weight: 400; color: #6e7278; }',
+    '.p-count { flex: none; background: #f5c518; color: #1b1c20; border-radius: 20px;',
+    '  padding: 1px 8px; font-size: 10.5px; font-weight: 700; }',
+    '.p-count[hidden] { display: none; }',
+    '.p-item + .p-item { border-top: 1px solid #e3e4e8; }',
+    '.p-line { display: flex; align-items: center; gap: 8px; padding: 8px 11px 5px; }',
+    '.p-icon { flex: none; display: inline-flex; align-items: center; color: #94740a; }',
+    '.p-icon svg { display: block; }',
+    '.p-name { flex: 1; min-width: 0; font-size: 12px; font-weight: 600;',
     '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
-    '.tt-state { flex: none; font-size: 11px; color: #6e7278; font-variant-numeric: tabular-nums; }',
-    '.tt-state.ok { color: #94740a; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }',
-    '.tt-state.err { color: #dc2626; font-weight: 700; }',
-    '.tt-spin { flex: none; width: 12px; height: 12px; border-radius: 50%;',
+    '.p-state { flex: none; font-size: 11px; color: #6e7278; font-variant-numeric: tabular-nums; }',
+    '.p-state.ok { color: #94740a; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }',
+    '.p-state.err { color: #dc2626; font-weight: 700; }',
+    '.p-spin { flex: none; width: 12px; height: 12px; border-radius: 50%;',
     '  border: 2px solid #ececef; border-top-color: #f5c518; animation: spin .7s linear infinite; }',
-    '.tt-bar { height: 3px; background: #ececef; }',
-    '.tt-fill { height: 100%; width: 0; background: #f5c518; box-shadow: 0 0 8px rgba(245, 197, 24, .5);',
-    '  transition: width .25s linear; }',
-    '.tt-bar[hidden] { display: none; }',
+    '.p-spin[hidden] { display: none; }',
+    /* Крестик держит своё место всегда — иначе строка дёргалась бы на ховере */
+    '.p-cancel { flex: none; width: 16px; height: 16px; padding: 0; border: none; border-radius: 5px;',
+    '  background: none; color: #6e7278; cursor: pointer; opacity: 0; transition: opacity .12s ease;',
+    '  display: inline-flex; align-items: center; justify-content: center; }',
+    '.p-cancel svg { display: block; }',
+    '.p-item:hover .p-cancel { opacity: 1; }',
+    '.p-cancel:hover { background: #ececef; color: #dc2626; }',
+    /* Метрики и полоса заведены сразу: высота строки не меняется по ходу */
+    '.p-meta { min-height: 13px; padding: 0 11px 6px; font-size: 10.5px; color: #6e7278;',
+    '  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+    '.p-bar { height: 3px; background: #ececef; }',
+    '.p-fill { height: 100%; width: 0; background: #f5c518;',
+    '  box-shadow: 0 0 8px rgba(245, 197, 24, .5); transition: width .25s linear; }',
+    '.p-foot { padding: 6px 11px; border-top: 1px solid #e3e4e8; font-size: 10.5px; color: #6e7278; }',
     '@media (prefers-color-scheme: dark) {',
-    '  .tt { background: #262a33; color: #f2f3f5; border-color: #363b47; }',
-    '  .tt-state { color: #a3a9b4; }',
-    '  .tt-state.ok, .tt-icon { color: #f5c518; }',
-    '  .tt-bar { background: #313642; }',
-    '  .tt-spin { border-color: #313642; border-top-color: #f5c518; }',
+    '  .panel { background: #262a33; color: #f2f3f5; border-color: #363b47; }',
+    '  .p-head, .p-item + .p-item, .p-foot { border-color: #363b47; }',
+    '  .p-hint, .p-state, .p-meta, .p-foot, .p-cancel { color: #a3a9b4; }',
+    '  .p-state.ok, .p-icon { color: #f5c518; }',
+    '  .p-bar { background: #313642; }',
+    '  .p-spin { border-color: #313642; border-top-color: #f5c518; }',
+    '  .p-cancel:hover { background: #313642; }',
     '}',
     '@media (prefers-reduced-motion: reduce) {',
-    '  .tt, .tt.out { animation: none; }',
-    '  .tt-spin { animation: none; }',
+    '  .panel, .panel.out { animation: none; }',
+    '  .p-spin { animation: none; }',
+    '  .p-fill { transition: none; }',
     '}',
   ].join('\n');
   shadow.append(style);
@@ -376,6 +391,12 @@ function videoTarget(v: HTMLVideoElement): PickTarget {
   if (direct) return { el: v, kind: 'video', url: direct };
   // MSE: потока с адресом не существует, зато есть страница поста
   return { el: v, kind: 'video', postUrl: postUrl(v) ?? location.href };
+}
+
+/** Курсор над нашим же интерфейсом: меню выбора или панель загрузок.
+ *  Судим по координатам — shadow root закрытый, composedPath снаружи пуст */
+function overOwnUi(x: number, y: number): boolean {
+  return (menuEl != null && hits(menuEl, x, y)) || (panelEl != null && hits(panelEl, x, y));
 }
 
 /** Курсор реально стоит на этом элементе, даже если сверху лежит чужой слой */
@@ -484,22 +505,6 @@ function drawFrame(t: PickTarget | null): void {
   if (tagEl) tagEl.textContent = frameLabel(t);
 }
 
-function drawPanel(count: number): void {
-  if (!TOP_FRAME) return;
-  if (!panelEl) {
-    panelEl = document.createElement('div');
-    panelEl.className = 'panel';
-    // Всегда нижняя строка уголка: тосты копятся над ней
-    cornerBox().append(panelEl);
-  }
-  panelEl.textContent = '';
-  const title = document.createElement('b');
-  title.textContent = count > 0 ? `Downy: ${count}` : 'Downy';
-  const hint = document.createElement('span');
-  hint.textContent = count > 0 ? 'ESC — закончить' : 'тыкай в медиа, ESC — выход';
-  panelEl.append(title, hint);
-}
-
 function closeMenu(): void {
   menuEl?.remove();
   menuEl = null;
@@ -597,13 +602,14 @@ function setPicker(on: boolean): void {
   setCursor(on);
   closeMenu();
   if (on) {
-    drawPanel(0);
+    // Панель — общий дом для подсказки прицела и строк загрузок
+    if (TOP_FRAME) panel();
   } else {
     drawFrame(null);
-    panelEl?.remove();
-    panelEl = null;
     hovered = null;
   }
+  syncHead();
+  closePanelIfIdle();
 }
 
 function leavePicker(why: string): void {
@@ -620,7 +626,7 @@ for (const type of ['pointerdown', 'mousedown', 'mouseup', 'auxclick'] as const)
     (e) => {
       if (!pickerOn) return;
       const point = e as MouseEvent;
-      if (menuEl && hits(menuEl, point.clientX, point.clientY)) return;
+      if (overOwnUi(point.clientX, point.clientY)) return;
       e.preventDefault();
       e.stopPropagation();
     },
@@ -653,9 +659,8 @@ document.addEventListener(
   'click',
   (e) => {
     if (!pickerOn) return;
-    // Клик по нашему меню — пусть отработает его кнопка. Судим по координатам:
-    // shadow root закрытый, и composedPath() снаружи меню не показывает
-    if (menuEl && hits(menuEl, e.clientX, e.clientY)) return;
+    // Клик по нашему меню или по крестику в панели — пусть отработает кнопка
+    if (overOwnUi(e.clientX, e.clientY)) return;
     e.preventDefault();
     e.stopPropagation();
     if (menuEl) {
@@ -704,37 +709,22 @@ for (const event of ['scroll', 'resize'] as const) {
 chrome.runtime.onMessage.addListener(
   (msg: { type?: string; on?: boolean; count?: number; jobs?: PageJob[] }) => {
     if (msg?.type === 'picker') setPicker(!!msg.on);
-    else if (msg?.type === 'picker-count' && pickerOn) drawPanel(msg.count ?? 0);
-    // Тосты живут и после выхода из прицела: загрузка идёт своим ходом
+    // Панель живёт и после выхода из прицела: загрузка идёт своим ходом
     else if (msg?.type === 'page-jobs' && TOP_FRAME) {
-      for (const job of msg.jobs ?? []) updateToast(job);
+      for (const job of msg.jobs ?? []) updateJob(job);
     }
   },
 );
 
-// ---------- Тосты: что происходит с загрузкой, начатой со страницы ----------
+// ---------- Панель Downy: что происходит с загрузками, начатыми со страницы ----------
 //
-// Попап в этот момент закрыт, и без тоста клик прицелом выглядит так, будто
-// ничего не произошло. Короткая загрузка успевает только объявить о старте:
-// держать «готово» на экране ради картинки на два мегабайта незачем.
+// Попап в этот момент закрыт, и без панели клик прицелом выглядит так, будто
+// ничего не произошло. Всё живёт одним блоком, а не россыпью карточек: прицел
+// липкий, картинки таскают пачками, и десяток отдельных теней в углу — это
+// свалка. Готовое сворачивается в одну строку итога, поэтому пачка из двадцати
+// картинок не растит блок вовсе.
 
-/** Дольше этого — результат стоит показать: человек уже забыл, что качал */
-const TOAST_LONG_MS = 10_000;
-/** Больше не помещается по-человечески: старые завершённые уступают место */
-const TOAST_MAX = 4;
-
-interface Toast {
-  node: HTMLDivElement;
-  state: HTMLSpanElement;
-  bar: HTMLDivElement;
-  fill: HTMLDivElement;
-  spin: HTMLSpanElement;
-  startedAt: number;
-  finished: boolean;
-}
-
-const toasts = new Map<string, Toast>();
-
+/** Уголок в правом нижнем углу: панель — его единственный жилец */
 function cornerBox(): HTMLDivElement {
   const root = ui();
   let box = root.querySelector<HTMLDivElement>('.corner');
@@ -748,129 +738,248 @@ function cornerBox(): HTMLDivElement {
 
 const ICON_KINDS = new Set<FileKind>(['video', 'image', 'audio', 'other']);
 
-function toastIcon(kind?: string): HTMLSpanElement {
+/** Дольше этого — результат стоит подержать: человек уже забыл, что качал */
+const DONE_LONG_MS = 10_000;
+/** Сколько на экране живёт строка «скачано N» после последней загрузки */
+const ROLLUP_MS = 6000;
+
+interface Row {
+  node: HTMLDivElement;
+  state: HTMLSpanElement;
+  spin: HTMLSpanElement;
+  meta: HTMLDivElement | null;
+  fill: HTMLDivElement;
+  startedAt: number;
+  finished: boolean;
+}
+
+const rows = new Map<string, Row>();
+let listEl: HTMLDivElement | null = null;
+let countEl: HTMLSpanElement | null = null;
+let hintEl: HTMLSpanElement | null = null;
+let footEl: HTMLDivElement | null = null;
+let footTimer = 0;
+let doneCount = 0;
+let doneBytes = 0;
+
+function activeRows(): number {
+  let n = 0;
+  for (const row of rows.values()) if (!row.finished) n++;
+  return n;
+}
+
+function syncHead(): void {
+  if (countEl) {
+    const n = activeRows();
+    countEl.textContent = n > 0 ? String(n) : '';
+    countEl.hidden = n === 0;
+  }
+  if (hintEl) hintEl.textContent = pickerOn ? 'ESC — закончить' : '';
+}
+
+function panel(): HTMLDivElement {
+  if (panelEl) return panelEl;
+  panelEl = document.createElement('div');
+  panelEl.className = 'panel';
+
+  const head = document.createElement('div');
+  head.className = 'p-head';
+  const brand = document.createElement('b');
+  brand.textContent = 'Downy';
+  hintEl = document.createElement('span');
+  hintEl.className = 'p-hint';
+  countEl = document.createElement('span');
+  countEl.className = 'p-count';
+  countEl.hidden = true;
+  head.append(brand, hintEl, countEl);
+
+  listEl = document.createElement('div');
+  panelEl.append(head, listEl);
+  cornerBox().append(panelEl);
+  syncHead();
+  return panelEl;
+}
+
+/** Блок уходит, когда рассказывать больше не о чем */
+function closePanelIfIdle(): void {
+  if (!panelEl || pickerOn) return;
+  if (rows.size > 0 || footEl) return;
+  const gone = panelEl;
+  panelEl = null;
+  listEl = countEl = hintEl = null;
+  gone.classList.add('out');
+  window.setTimeout(() => gone.remove(), 200);
+}
+
+function typeIcon(kind?: string): HTMLSpanElement {
   const span = document.createElement('span');
-  span.className = 'tt-icon';
+  span.className = 'p-icon';
   span.innerHTML = typeIconSvg(ICON_KINDS.has(kind as FileKind) ? (kind as FileKind) : 'video');
   return span;
 }
 
-function makeToast(job: PageJob): Toast {
-  const node = document.createElement('div');
-  node.className = 'tt';
+/** Крестик отмены — проявляется при наведении на строку */
+function cancelBtn(jobId: string): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.className = 'p-cancel';
+  btn.title = 'Отменить загрузку';
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+    '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    log(`отменяем загрузку ${jobId}`);
+    void chrome.runtime.sendMessage({ type: 'cancel-job', jobId }).catch(() => {});
+  });
+  return btn;
+}
 
-  const row = document.createElement('div');
-  row.className = 'tt-row';
+/**
+ * Строка загрузки. Высота задаётся сразу и больше не меняется: полоса и место
+ * под метрики есть с самого начала, иначе появление процентов дёргало бы
+ * соседние строки. Метрики заводим только видео — картинке показывать нечего.
+ */
+function makeRow(job: PageJob): Row {
+  const node = document.createElement('div');
+  node.className = 'p-item';
+
+  const line = document.createElement('div');
+  line.className = 'p-line';
 
   const name = document.createElement('span');
-  name.className = 'tt-name';
+  name.className = 'p-name';
   name.textContent = job.label;
   name.title = job.label;
 
   const spin = document.createElement('span');
-  spin.className = 'tt-spin';
+  spin.className = 'p-spin';
 
   const state = document.createElement('span');
-  state.className = 'tt-state';
-  state.textContent = 'запускаю';
+  state.className = 'p-state';
 
-  row.append(toastIcon(job.mediaKind), name, spin, state);
+  line.append(typeIcon(job.mediaKind), name, spin, state, cancelBtn(job.jobId));
+
+  const withMeta = job.mediaKind !== 'image';
+  let meta: HTMLDivElement | null = null;
+  if (withMeta) {
+    meta = document.createElement('div');
+    meta.className = 'p-meta';
+  }
 
   const bar = document.createElement('div');
-  bar.className = 'tt-bar';
-  bar.hidden = true;
+  bar.className = 'p-bar';
   const fill = document.createElement('div');
-  fill.className = 'tt-fill';
+  fill.className = 'p-fill';
   bar.append(fill);
 
-  node.append(row, bar);
-  // Свежий тост сверху стопки, плашка прицела всегда остаётся внизу
-  const box = cornerBox();
-  box.insertBefore(node, box.firstChild);
+  node.append(line);
+  if (meta) node.append(meta);
+  node.append(bar);
 
-  return { node, state, bar, fill, spin, startedAt: Date.now(), finished: false };
+  const list = panel() && listEl!;
+  list.insertBefore(node, list.firstChild);
+
+  return { node, state, spin, meta, fill, startedAt: Date.now(), finished: false };
 }
 
-function dropToast(jobId: string, after: number): void {
-  const t = toasts.get(jobId);
-  if (!t) return;
+function showRollup(): void {
+  panel();
+  if (!footEl) {
+    footEl = document.createElement('div');
+    footEl.className = 'p-foot';
+    panelEl!.append(footEl);
+  }
+  footEl.textContent = `скачано ${doneCount} · ${fmtSize(doneBytes)}`;
+  window.clearTimeout(footTimer);
+  footTimer = window.setTimeout(() => {
+    doneCount = 0;
+    doneBytes = 0;
+    footEl?.remove();
+    footEl = null;
+    closePanelIfIdle();
+  }, ROLLUP_MS);
+}
+
+function dropRow(jobId: string, after: number): void {
   window.setTimeout(() => {
-    t.node.classList.add('out');
-    window.setTimeout(() => {
-      t.node.remove();
-      toasts.delete(jobId);
-    }, 200);
+    const row = rows.get(jobId);
+    if (!row) return;
+    row.node.remove();
+    rows.delete(jobId);
+    showRollup();
+    syncHead();
+    closePanelIfIdle();
   }, after);
 }
 
-/** Стопка не должна расти бесконечно: пачку в двадцать картинок не прочесть */
-function trimToasts(): void {
-  const done = [...toasts.entries()].filter(([, t]) => t.finished);
-  while (toasts.size > TOAST_MAX && done.length > 0) {
-    const [id, t] = done.shift()!;
-    t.node.remove();
-    toasts.delete(id);
-  }
-}
-
-function updateToast(job: PageJob): void {
+function updateJob(job: PageJob): void {
   if (job.state === 'canceled') {
-    const t = toasts.get(job.jobId);
-    if (t) {
-      t.node.remove();
-      toasts.delete(job.jobId);
-    }
+    const row = rows.get(job.jobId);
+    row?.node.remove();
+    rows.delete(job.jobId);
+    syncHead();
+    closePanelIfIdle();
     return;
   }
 
-  let t = toasts.get(job.jobId);
-  if (!t) {
-    t = makeToast(job);
-    toasts.set(job.jobId, t);
-    trimToasts();
+  let row = rows.get(job.jobId);
+  if (!row) {
+    row = makeRow(job);
+    rows.set(job.jobId, row);
+    syncHead();
   }
-  if (t.finished) return;
+  if (row.finished) return;
 
-  if (job.state === 'queued') {
-    t.state.textContent = 'в очереди';
+  if (job.state === 'queued' || job.state === 'starting') {
+    // Слова тут ничего не добавляют — крутится спиннер
+    row.state.textContent = '';
     return;
   }
 
-  if (job.state === 'running' || job.state === 'starting') {
-    t.spin.remove();
+  if (job.state === 'running') {
     const ratio = job.progress ?? (job.totalBytes ? (job.bytes ?? 0) / job.totalBytes : null);
     if (ratio != null) {
-      t.bar.hidden = false;
-      t.fill.style.width = `${Math.round(ratio * 100)}%`;
-      t.state.textContent = `${Math.round(ratio * 100)}%`;
+      row.spin.hidden = true;
+      row.fill.style.width = `${Math.round(ratio * 100)}%`;
+      row.state.textContent = `${Math.round(ratio * 100)}%`;
     } else {
-      // Долю ещё не знаем — полосе рисовать нечего, показываем скачанное
-      t.bar.hidden = true;
-      t.state.textContent = fmtSize(job.bytes) || 'качаю';
+      row.state.textContent = fmtSize(job.bytes);
+      row.spin.hidden = row.state.textContent !== '';
+    }
+    if (row.meta) {
+      const speed = fmtSpeed(job.speedBps);
+      const total = job.totalBytes ?? (ratio && job.bytes ? job.bytes / ratio : undefined);
+      const eta =
+        job.speedBps && total && job.bytes ? fmtEta((total - job.bytes) / job.speedBps) : '';
+      row.meta.textContent = [speed, eta && `ост. ${eta}`].filter(Boolean).join(' · ');
     }
     return;
   }
 
-  // Готово или ошибка — дальше тост только уезжает
-  t.finished = true;
-  t.spin.remove();
-  t.bar.remove();
-  t.state.textContent = '';
-  const quick = Date.now() - t.startedAt < TOAST_LONG_MS;
+  // Готово или ошибка — дальше строка только доживает своё
+  row.finished = true;
+  row.spin.hidden = true;
+  if (row.meta) row.meta.textContent = '';
+  syncHead();
+
   if (job.state === 'done') {
-    t.state.className = 'tt-state ok';
-    t.state.innerHTML =
+    row.fill.style.width = '100%';
+    row.state.className = 'p-state ok';
+    row.state.innerHTML =
       '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
       '<path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6"' +
       ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    t.state.append(fmtSize(job.bytes) || 'готово');
+    row.state.append(fmtSize(job.bytes) || 'готово');
+    doneCount++;
+    doneBytes += job.bytes ?? 0;
     // Быстрая загрузка сама себе уведомление о старте: показали и убрали
-    dropToast(job.jobId, quick ? 900 : 4500);
+    dropRow(job.jobId, Date.now() - row.startedAt < DONE_LONG_MS ? 900 : 4000);
   } else {
-    t.state.className = 'tt-state err';
-    t.state.textContent = 'ошибка';
-    t.node.title = job.message ?? '';
-    dropToast(job.jobId, 6000);
+    row.fill.style.width = '0%';
+    row.state.className = 'p-state err';
+    row.state.textContent = 'ошибка';
+    row.node.title = job.message ?? '';
+    dropRow(job.jobId, 6000);
   }
 }
 
@@ -881,6 +990,7 @@ interface PageJob {
   progress: number | null;
   bytes?: number;
   totalBytes?: number;
+  speedBps?: number;
   mediaKind?: string;
   message?: string;
 }

@@ -26,7 +26,8 @@ export function fmtEta(sec?: number): string {
 }
 
 export interface JobProgressView {
-  /** Текст рядом со шкалой: «45% · 12.4 МБ/с · ост. 1:20», «42%», «идёт…» */
+  /** Текст рядом со шкалой: «45% · 12.4 МБ/с · ост. 1:20», «42%». Пусто —
+   *  сказать пока нечего: UI показывает спиннер, слова тут ничего не добавляют */
   text: string;
   /** Заполнение шкалы 0..1; null — неопределённая шкала */
   ratio: number | null;
@@ -52,7 +53,7 @@ export function jobProgressView(
   const speed = fmtSpeed(speedBps);
   if (speed) {
     // Скорость известна — компактно: процент, скорость, остаток
-    const head = ratio != null ? `${Math.round(ratio * 100)}%` : fmtSize(bytes) || 'идёт…';
+    const head = ratio != null ? `${Math.round(ratio * 100)}%` : fmtSize(bytes);
     const parts = [head, speed];
     const eta = fmtEta(bytes && total && speedBps ? (total - bytes) / speedBps : undefined);
     if (eta) parts.push(`ост. ${eta}`);
@@ -71,5 +72,5 @@ export function jobProgressView(
   if (progress != null) {
     return { text: `${Math.round(progress * 100)}%`, ratio: progress };
   }
-  return { text: 'идёт…', ratio: null };
+  return { text: '', ratio: null };
 }
