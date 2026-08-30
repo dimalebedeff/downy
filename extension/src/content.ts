@@ -478,12 +478,13 @@ function imageAt(x: number, y: number): PickTarget | null {
 function imageTarget(el: Element, url: string): PickTarget {
   const href = el.closest('a')?.href;
   const post = href ? absUrl(href) : null;
-  return {
-    el,
-    kind: 'image',
-    url,
-    postUrl: post && POST_LINK.test(post) ? post : undefined,
-  };
+  let offerVideo = post != null && POST_LINK.test(post);
+  // В ленте X ссылка на пост висит на каждой картинке, включая фотопосты без
+  // единого ролика. Раз карточка поста опознана — спрашиваем её саму, есть ли
+  // там видео, и не предлагаем скачать то, чего в посте нет
+  const card = el.closest(POST_CARD);
+  if (offerVideo && card) offerVideo = card.querySelector('video') != null;
+  return { el, kind: 'image', url, postUrl: offerVideo ? (post ?? undefined) : undefined };
 }
 
 /** Видео важнее картинки, но постер плеера и превью в ленте — тоже добыча.
