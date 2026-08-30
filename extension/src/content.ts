@@ -598,6 +598,68 @@ function showChoice(t: PickTarget, x: number, y: number): void {
   ]);
 }
 
+/** Превью ролика: постер самого плеера, а если его нет — картинка рядом */
+function posterOf(t: PickTarget): string | undefined {
+  const video =
+    t.el instanceof HTMLVideoElement ? t.el : t.el.closest(POST_CARD)?.querySelector('video');
+  const poster = video?.getAttribute('poster');
+  const abs = poster ? absUrl(poster) : null;
+  return abs ?? t.altImageUrl;
+}
+
+/**
+ * Правый клик в прицеле: всё, что можно взять с этого элемента. Левый клик
+ * решает за человека и спрашивает, только когда выбор неизбежен, — а здесь
+ * человек сам попросил показать варианты, включая превью, до которого иначе
+ * не добраться: под курсором всегда выигрывает видео.
+ */
+function showAllOptions(t: PickTarget, x: number, y: number): void {
+  const items: { label: string; run: () => void }[] = [];
+
+  if (t.kind === 'video') {
+    const video: PickTarget = { ...t, altImageUrl: undefined };
+    // Без chosen: где есть качества, фон вернёт их вторым меню
+    items.push({ label: 'Скачать видео', run: () => void send(video) });
+    items.push({ label: 'Только звук', run: () => void send(video, { streams: 'audio', chosen: true }) });
+    const poster = posterOf(t);
+    if (poster) {
+      items.push({
+        label: 'Скачать превью',
+        run: () => void send({ el: t.el, kind: 'image', url: poster }, { chosen: true }),
+      });
+    }
+  } else {
+    items.push({
+      label: 'Скачать картинку',
+      run: () => void send({ el: t.el, kind: 'image', url: t.url }, { chosen: true }),
+    });
+    if (t.postUrl) {
+      items.push({
+        label: 'Скачать видео',
+        run: () => void send({ el: t.el, kind: 'video', postUrl: t.postUrl }),
+      });
+    }
+  }
+
+  openMenu(x, y, items);
+}
+
+document.addEventListener(
+  'contextmenu',
+  (e) => {
+    if (!pickerOn) return;
+    // По своему же меню правый клик пропускаем: пусть закроется как обычно
+    if (overOwnUi(e.clientX, e.clientY)) return;
+    const t = pickAt(e.clientX, e.clientY);
+    if (!t) return; // мимо медиа — родное меню браузера не отбираем
+    e.preventDefault();
+    e.stopPropagation();
+    hovered = t;
+    showAllOptions(t, e.clientX, e.clientY);
+  },
+  true,
+);
+
 function markTaken(key: string | undefined): void {
   if (key) takenKeys.add(key);
   if (hovered) drawFrame(hovered);
@@ -807,7 +869,8 @@ function syncHead(): void {
     countEl.textContent = n > 0 ? String(n) : '';
     countEl.hidden = n === 0;
   }
-  if (hintEl) hintEl.textContent = pickerOn ? 'ESC — закончить' : '';
+  // Про правый клик иначе никто не узнает: подсказка живёт там же, где режим
+  if (hintEl) hintEl.textContent = pickerOn ? 'ПКМ — варианты · ESC — выход' : '';
 }
 
 function panel(): HTMLDivElement {
