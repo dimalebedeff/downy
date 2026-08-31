@@ -275,15 +275,19 @@ function stripTracks(jobId: string, srcFile: string, outFile: string, streams: '
   const finish = (code: number | null): void => {
     if (settled) return;
     settled = true;
+    // Исходник — это всё уже скачанное. На паузе его сносить нельзя: человек
+    // нажал «подожди», а получил бы «качай заново». После ▶ yt-dlp увидит
+    // готовый файл, отдаст его сразу, и вырезка (она быстрая) пойдёт по новой.
     // Синхронно: после jobDone хост могут закрыть, и хвост останется на диске
-    try {
-      fs.rmSync(srcFile, { force: true });
-    } catch {
-      // временный файл не критичен
+    if (!job.paused) {
+      try {
+        fs.rmSync(srcFile, { force: true });
+      } catch {
+        // временный файл не критичен
+      }
     }
-    log('strip exit', jobId, code, 'canceled:', job.canceled);
-    // Вырезка дорожки — быстрая локальная операция, пауза к ней не применяется
-    jobDone(jobId, code, { canceled: job.canceled }, outFile, errTail);
+    log('strip exit', jobId, code, 'canceled:', job.canceled, 'paused:', job.paused);
+    jobDone(jobId, code, { canceled: job.canceled, paused: job.paused }, outFile, errTail);
   };
   child.on('error', (e) => {
     errTail = `Не удалось запустить ffmpeg: ${e.message}`;
@@ -361,13 +365,20 @@ function startFfmpegCopy(req: FfmpegCopySource, outFile: string, streams: Stream
     });
   });
 
+  // При ошибке спавна срабатывают и 'error', и 'close' — финиш должен быть один,
+  // иначе список дёргается дважды и джоб успевает пожить после собственной смерти
+  let settled = false;
   child.on('error', (e) => {
+    if (settled) return;
+    settled = true;
     jobs.delete(req.jobId);
     log('ffmpeg spawn error', e.message);
     emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: `Не удалось запустить ffmpeg: ${e.message}` });
   });
 
   child.on('close', (code) => {
+    if (settled) return;
+    settled = true;
     log('ffmpeg exit', req.jobId, code, 'canceled:', job.canceled, 'paused:', job.paused);
     // Обрубленный ffmpeg-файл не докачивается — пауза здесь = начать заново
     jobDone(req.jobId, code, job, outFile, errTail, false);

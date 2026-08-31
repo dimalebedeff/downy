@@ -47,9 +47,10 @@ export function cleanupPartials(outFile: string): void {
   const base = path.basename(outFile);
   try {
     for (const f of fs.readdirSync(dir)) {
-      // Только известные суффиксы yt-dlp: по голому префиксу можно зацепить
-      // чужой файл вида «имя.mp4.bak»
-      if (f === base || f.startsWith(`${base}.part`) || f === `${base}.ytdl`) {
+      // Только известные суффиксы: свои у yt-dlp (.part, .ytdl) и наш .dl.mp4,
+      // куда качается исходник для вырезки дорожки. По голому префиксу можно
+      // зацепить чужой файл вида «имя.mp4.bak»
+      if (f === base || f.startsWith(`${base}.part`) || f === `${base}.ytdl` || f === `${base}.dl.mp4`) {
         fs.rmSync(path.join(dir, f), { force: true });
       }
     }
