@@ -242,7 +242,7 @@ function downloadCover(item: MediaItem, coverUrl: string): void {
       tabId: item.tabId,
       foundAt: Date.now(),
       pageUrl: item.pageUrl,
-      pageTitle: `${itemTitle(item)} [обложка]`,
+      pageTitle: `${itemTitle(item)} [превью]`,
       contentType: 'image/jpeg',
     },
     streams: 'both',
@@ -344,7 +344,7 @@ function makeThumbDownloadable(thumbBox: HTMLDivElement, run: () => void): void 
   thumbBox.classList.add('thumb-dl');
   const hint = document.createElement('span');
   hint.className = 'thumb-hint';
-  hint.textContent = 'Скачать обложку';
+  hint.textContent = 'Скачать превью';
   thumbBox.append(hint);
   thumbBox.addEventListener('click', run);
 }
@@ -455,9 +455,14 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'card';
 
+  const probeReady = pv.probe?.status === 'ready' ? pv.probe : undefined;
+
   const thumbBox = document.createElement('div');
   thumbBox.className = 'thumb';
-  const thumbSrc = displayThumb(pv.thumb, pageThumb);
+  // Обложка из разведки — третий источник, и на ютубе единственный рабочий:
+  // кадр со страницы там не снять (чужой домен пачкает canvas), постера у
+  // плеера нет, и карточка оставалась с киноленточкой вместо картинки
+  const thumbSrc = displayThumb(pv.thumb, probeReady?.thumbnailUrl, pageThumb);
   if (thumbSrc) {
     const img = document.createElement('img');
     img.src = thumbSrc;
@@ -467,15 +472,13 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
   } else {
     thumbBox.textContent = '🎬';
   }
-  // Обложку страницы достаёт yt-dlp — работает и без превью
+  // Превью страницы достаёт yt-dlp — работает и там, где кадр не снять
   makeThumbDownloadable(thumbBox, () => {
     void chrome.runtime.sendMessage({ type: 'download-thumb-ytdlp', pageUrl: pv.url, pageTitle: pv.title });
   });
 
   const body = document.createElement('div');
   body.className = 'card-body';
-
-  const probeReady = pv.probe?.status === 'ready' ? pv.probe : undefined;
 
   const title = document.createElement('div');
   title.className = 'card-title';
@@ -547,7 +550,7 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
         hint: 'Ютуб не отдаёт отрезки — пришлось бы качать весь ролик',
       },
       {
-        label: 'Скачать обложку',
+        label: 'Скачать превью',
         run: () => {
           void chrome.runtime.sendMessage({ type: 'download-thumb-ytdlp', pageUrl: pv.url, pageTitle: pv.title });
         },
@@ -651,7 +654,7 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
     }
     const coverUrl = coverUrlFor(item);
     if (coverUrl) {
-      actions.push({ label: 'Скачать обложку', run: () => downloadCover(item, coverUrl) });
+      actions.push({ label: 'Скачать превью', run: () => downloadCover(item, coverUrl) });
     }
     actions.push({
       label: 'Копировать ссылку',

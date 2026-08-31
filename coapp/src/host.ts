@@ -669,7 +669,7 @@ function startThumbnail(req: ThumbnailJobRequest): void {
     }
     if (!job.canceled && code === 0 && !fs.existsSync(outFile)) {
       forgetJob(req.jobId);
-      emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: 'У страницы не нашлось обложки' });
+      emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: 'У страницы не нашлось превью' });
       return;
     }
     jobDone(req.jobId, code, { canceled: job.canceled }, outFile, errTail);

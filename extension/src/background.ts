@@ -1106,7 +1106,7 @@ async function startThumbnailJob(pageUrl: string, pageTitle?: string): Promise<{
   const jobId = crypto.randomUUID();
   const probed = probeCache.get(pageUrl);
   const title = (probed?.status === 'ready' ? probed.title : undefined) ?? pageTitle;
-  const filenameStem = buildYtdlpStem(title, pageUrl, 'обложка', 'both');
+  const filenameStem = buildYtdlpStem(title, pageUrl, 'превью', 'both');
   const job: JobInfo = {
     jobId,
     label: filenameStem,
