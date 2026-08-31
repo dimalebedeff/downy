@@ -101,20 +101,31 @@ interface RunningJob {
   canceled: boolean;
   /** Пауза: процесс убиваем, но недокачанное оставляем для резюма */
   paused: boolean;
+  /** Куда пишем. Расширение узнаёт путь только из наших событий, а без него
+   *  обрыв связи превращает докачку в «качай заново» */
+  outFile?: string;
   kill(): void;
 }
 
 const jobs = new Map<string, RunningJob>();
 
-function processJob(child: ChildProcess): RunningJob {
+function processJob(child: ChildProcess, outFile?: string): RunningJob {
   return {
     canceled: false,
     paused: false,
+    outFile,
     kill: () => killProcessTree(child),
   };
 }
 
 function emit(event: JobEvent): void {
+  // Путь дописываем в каждое событие джоба, а не только в финальные: оборвись
+  // связь на середине — расширение уже знает, что докачивать, и не начинает
+  // с нуля, оставляя недокачанный файл в папке под приличным именем
+  if (event.type === 'job' && !event.outFile) {
+    const known = jobs.get(event.jobId)?.outFile;
+    if (known) return sendMessage({ ...event, outFile: known });
+  }
   sendMessage(event);
 }
 
@@ -195,7 +206,7 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelec
 
   log('yt-dlp hls start', req.jobId, req.url, '->', outFile, 'streams:', streams);
   const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-  const job = processJob(child);
+  const job = processJob(child, outFile);
   jobs.set(req.jobId, job);
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
 
@@ -263,7 +274,7 @@ function stripTracks(jobId: string, srcFile: string, outFile: string, streams: '
   log('strip start', jobId, srcFile, '->', outFile);
   const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
   // Отмена с этого момента должна убивать ffmpeg, а не завершившийся yt-dlp
-  const job = processJob(child);
+  const job = processJob(child, outFile);
   jobs.set(jobId, job);
 
   let errTail = '';
@@ -320,7 +331,7 @@ function startFfmpegCopy(req: FfmpegCopySource, outFile: string, streams: Stream
 
   log('ffmpeg start', req.jobId, req.url, '->', outFile);
   const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-  const job = processJob(child);
+  const job = processJob(child, outFile);
   jobs.set(req.jobId, job);
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
 
@@ -415,7 +426,7 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
   }
 
   const ac = new AbortController();
-  const job: RunningJob = { canceled: false, paused: false, kill: () => ac.abort() };
+  const job: RunningJob = { canceled: false, paused: false, outFile, kill: () => ac.abort() };
   jobs.set(req.jobId, job);
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
   log('direct start', req.jobId, req.url, '->', outFile);
@@ -508,6 +519,10 @@ function startYtdlp(req: YtdlpJobRequest): void {
     },
     {
       onProgress: ytdlpProgressToEmit(req.jobId),
+      onFile: (f) => {
+        const running = jobs.get(req.jobId);
+        if (running) running.outFile = f;
+      },
       onFinish: (r) => {
         jobs.delete(req.jobId);
         if (r.state === 'done') {
@@ -566,7 +581,7 @@ function startThumbnail(req: ThumbnailJobRequest): void {
 
   log('thumbnail start', req.jobId, req.pageUrl, '->', outFile);
   const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
-  const job = processJob(child);
+  const job = processJob(child, outFile);
   jobs.set(req.jobId, job);
   emit({ type: 'job', jobId: req.jobId, state: 'running', progress: null });
 

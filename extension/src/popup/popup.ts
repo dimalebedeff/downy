@@ -7,7 +7,7 @@ import { REPO } from '../lib/update';
 import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
 import { diffJobs } from '../lib/jobs-diff';
-import { isUnfinished, mergeVisibleOrder } from '../lib/queue';
+import { isUnfinished, mergeVisibleOrder, pausedLabel } from '../lib/queue';
 import { qualityOptions } from '../lib/ytdlp-formats';
 
 type MediaGroup = ReturnType<typeof groupMediaItems>[number];
@@ -919,7 +919,7 @@ function queueRow(job: JobInfo): HTMLLIElement {
     state.textContent = 'в очереди';
     row.append(cancelBtn(job));
   } else if (job.state === 'paused') {
-    state.textContent = 'пауза';
+    state.textContent = pausedLabel(job.pausedBy);
     row.append(resumeBtn(job), cancelBtn(job));
   } else {
     // Пусто — о начале говорит бегущая полоса под строкой

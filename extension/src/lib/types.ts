@@ -37,8 +37,11 @@ export interface JobInfo {
   sourceUrl?: string;
   state: 'queued' | 'starting' | 'running' | 'paused' | 'done' | 'error' | 'canceled';
   progress: number | null;
-  /** Кто поставил паузу: юзер (ждёт ▶) или вытеснение (продолжится само) */
-  pausedBy?: 'user' | 'preempt';
+  /** Кто поставил паузу: юзер (ждёт ▶), вытеснение (продолжится само) или
+   *  обрыв связи с хостом (тоже продолжится, но с оглядкой на счётчик) */
+  pausedBy?: 'user' | 'preempt' | 'dropped';
+  /** Сколько раз очередь уже поднимала эту загрузку после обрыва */
+  autoResumes?: number;
   /** Мимо очереди (обложки): мелочь не должна ждать двухгиговое кино */
   noQueue?: boolean;
   bytes?: number;

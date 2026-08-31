@@ -24,8 +24,16 @@ export function normalizeOrder(order: string[], jobs: Map<string, JobInfo>): str
 }
 
 /**
- * Кого стартовать, когда активной нет: первый queued либо вытесненная пауза
- * (она продолжается сама, ручная пауза ждёт кнопку ▶).
+ * Сколько раз очередь сама поднимет оборвавшуюся загрузку. Потолок нужен,
+ * чтобы падающий по кругу хост не перезапускался бесконечно: пара попыток —
+ * это уснувший service worker, десяток подряд — это сломанная установка.
+ */
+export const MAX_AUTO_RESUMES = 3;
+
+/**
+ * Кого стартовать, когда активной нет: первый queued, вытесненная пауза либо
+ * оборвавшаяся связь. Продолжаются сами обе — ждёт кнопку ▶ только та пауза,
+ * которую человек поставил своей рукой.
  */
 export function nextToStart(order: string[], jobs: Map<string, JobInfo>): string | undefined {
   for (const id of order) {
@@ -38,6 +46,7 @@ export function nextToStart(order: string[], jobs: Map<string, JobInfo>): string
     if (!j) continue;
     if (j.state === 'queued') return id;
     if (j.state === 'paused' && j.pausedBy === 'preempt') return id;
+    if (j.state === 'paused' && j.pausedBy === 'dropped' && (j.autoResumes ?? 0) < MAX_AUTO_RESUMES) return id;
   }
   return undefined;
 }
@@ -79,4 +88,13 @@ export function applyReorder(
     if (active && active.jobId !== head.jobId) preemptId = active.jobId;
   }
   return { order, preemptId };
+}
+
+/**
+ * Как зовётся пауза в интерфейсе. Обрыв связи паузой называть нельзя: человек
+ * кнопку не жал и будет искать, где он её нажал. Одно состояние — одно слово
+ * во всех частях интерфейса.
+ */
+export function pausedLabel(pausedBy: JobInfo['pausedBy']): string {
+  return pausedBy === 'dropped' ? 'оборвалось' : 'пауза';
 }

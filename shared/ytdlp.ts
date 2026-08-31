@@ -189,6 +189,9 @@ export interface YtdlpDownloadOptions {
 
 export interface YtdlpDownloadEvents {
   onProgress?: (p: YtdlpProgress) => void;
+  /** Путь стал известен — до финиша. Оборвись связь на середине, звать
+   *  докачку всё равно есть куда */
+  onFile?: (outFile: string) => void;
   onFinish: (r: { state: 'done' | 'error' | 'canceled' | 'paused'; outFile?: string; message?: string }) => void;
 }
 
@@ -311,11 +314,15 @@ export function createYtdlpEngine(o: { binDir: string; log?: Log }): YtdlpEngine
     let outFile = presetOutFile;
     let errTail = '';
     let settled = false;
+    if (presetOutFile) events.onFile?.(presetOutFile);
 
     child.stdout?.on('data', makeYtdlpStdoutHandler(
       (p) => events.onProgress?.(p),
       (f) => {
-        if (!presetOutFile) outFile = f;
+        if (!presetOutFile) {
+          outFile = f;
+          events.onFile?.(f);
+        }
       },
     ));
     child.stderr?.on('data', (d: Buffer) => {

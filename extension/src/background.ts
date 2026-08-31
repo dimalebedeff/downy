@@ -80,6 +80,9 @@ function pump(): void {
   if (!req) {
     job.state = 'error';
     job.message = 'Запрос загрузки потерялся при перезапуске';
+    // Иначе ошибка осталась бы в памяти: попап так и рисовал бы «в очереди»
+    persist();
+    broadcastJobs();
     pump();
     return;
   }
@@ -87,6 +90,9 @@ function pump(): void {
   if (job.outFile && (req.type === 'download_hls' || req.type === 'download_direct' || req.type === 'download_ytdlp')) {
     (req as HlsJobRequest | DirectJobRequest | YtdlpJobRequest).resumePath = job.outFile;
   }
+  // Подъём после обрыва считаем: пара попыток — это уснувший service worker,
+  // а вот десяток подряд означает, что поднимать уже нечего
+  if (job.pausedBy === 'dropped') job.autoResumes = (job.autoResumes ?? 0) + 1;
   job.state = 'starting';
   job.pausedBy = undefined;
   const res = sendToCoApp(req);
@@ -177,7 +183,7 @@ const restored: Promise<void> = (async () => {
       if (job.state === 'running' || job.state === 'starting') {
         if (jobRequests.has(id)) {
           job.state = 'paused';
-          job.pausedBy = 'user';
+          job.pausedBy = 'dropped';
         } else {
           job.state = 'error';
           job.message = 'Прервано перезапуском браузера';
@@ -534,6 +540,8 @@ function getCoAppPort(): chrome.runtime.Port {
       const track = nextSpeed(speedTracks.get(msg.jobId), msg.bytes, Date.now());
       speedTracks.set(msg.jobId, track);
       job.speedBps = track.bps;
+      // Байты пошли — значит связь живая, а прошлый обрыв был случайностью
+      job.autoResumes = undefined;
     } else if (msg.state !== 'running') {
       speedTracks.delete(msg.jobId);
       job.speedBps = undefined;
@@ -568,12 +576,13 @@ function getCoAppPort(): chrome.runtime.Port {
     pendingProbes.clear();
     for (const job of jobs.values()) {
       if (job.state === 'running' || job.state === 'starting') {
-        // Запрос сохранился — паузим, юзер продолжит кнопкой; авторесюм
-        // не делаем, чтобы упавший хост не перезапускался по кругу
+        // Запрос сохранился — паузим и поднимем сами: человек кнопку не жал,
+        // и врать ему про свою же паузу нечестно. От бесконечных перезапусков
+        // упавшего хоста бережёт потолок попыток в nextToStart
         if (jobRequests.has(job.jobId) && !job.noQueue) {
           job.state = 'paused';
-          job.pausedBy = 'user';
-          job.message = err ?? 'CoApp отключился';
+          job.pausedBy = 'dropped';
+          job.message = err ?? 'Связь с CoApp оборвалась';
         } else {
           job.state = 'error';
           job.message = err ?? 'CoApp отключился';
@@ -582,6 +591,8 @@ function getCoAppPort(): chrome.runtime.Port {
     }
     persist();
     broadcastJobs();
+    // Без этого оборвавшаяся загрузка стояла бы до следующего внешнего события
+    pump();
   });
   coappPort = port;
   return port;

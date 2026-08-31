@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { applyReorder, isUnfinished, mergeVisibleOrder, nextToStart, normalizeOrder } from '../src/lib/queue';
+import {
+  applyReorder,
+  isUnfinished,
+  MAX_AUTO_RESUMES,
+  mergeVisibleOrder,
+  nextToStart,
+  normalizeOrder,
+  pausedLabel,
+} from '../src/lib/queue';
 import type { JobInfo } from '../src/lib/types';
 
-function job(jobId: string, state: JobInfo['state'], pausedBy?: 'user' | 'preempt'): JobInfo {
+function job(jobId: string, state: JobInfo['state'], pausedBy?: JobInfo['pausedBy']): JobInfo {
   return { jobId, label: jobId, state, progress: null, pausedBy };
 }
 
@@ -111,5 +119,42 @@ describe('applyReorder', () => {
     // Попап не знал про свежий c — тот остаётся в хвосте; ghost выкидываем
     const res = applyReorder(['a', 'b', 'c'], ['ghost', 'b', 'a'], jobs);
     expect(res.order).toEqual(['b', 'a', 'c']);
+  });
+});
+
+describe('nextToStart: оборвавшаяся загрузка', () => {
+  it('обрыв связи очередь поднимает сама — человек кнопку не нажимал', () => {
+    const jobs = jobsMap(job('a', 'paused', 'dropped'), job('b', 'queued'));
+    expect(nextToStart(['a', 'b'], jobs)).toBe('a');
+  });
+
+  it('ручная пауза так и ждёт ▶, даже стоя первой', () => {
+    const jobs = jobsMap(job('a', 'paused', 'user'), job('b', 'queued'));
+    expect(nextToStart(['a', 'b'], jobs)).toBe('b');
+  });
+
+  it('после потолка попыток перестаём дёргать: хост валится не случайно', () => {
+    const dead = job('a', 'paused', 'dropped');
+    dead.autoResumes = MAX_AUTO_RESUMES;
+    const jobs = jobsMap(dead, job('b', 'queued'));
+    expect(nextToStart(['a', 'b'], jobs)).toBe('b');
+  });
+
+  it('пока попытки не исчерпаны — поднимаем', () => {
+    const shaky = job('a', 'paused', 'dropped');
+    shaky.autoResumes = MAX_AUTO_RESUMES - 1;
+    expect(nextToStart(['a'], jobsMap(shaky))).toBe('a');
+  });
+});
+
+describe('pausedLabel', () => {
+  it('обрыв связи — не пауза человека', () => {
+    expect(pausedLabel('dropped')).toBe('оборвалось');
+  });
+
+  it('своя пауза и вытеснение зовутся паузой', () => {
+    expect(pausedLabel('user')).toBe('пауза');
+    expect(pausedLabel('preempt')).toBe('пауза');
+    expect(pausedLabel(undefined)).toBe('пауза');
   });
 });
