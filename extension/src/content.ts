@@ -6,6 +6,7 @@
 
 import { backgroundImageUrl, bestFromSrcset, isPostLink, meetsPickThreshold } from './lib/pick';
 import { unsupportedReason } from './lib/unsupported';
+import { readThemeChoice, THEME_KEY, type ThemeChoice } from './lib/theme';
 import { fmtEta, fmtSize, fmtSpeed } from './lib/progress';
 import { typeIconSvg, type FileKind } from './lib/media-icon';
 
@@ -257,6 +258,8 @@ function log(message: string): void {
 let pickerOn = false;
 let hovered: PickTarget | null = null;
 let shadow: ShadowRoot | null = null;
+/** Хост панели: на нём висит класс выбранной темы, по нему бьют стили */
+let shadowHost: HTMLDivElement | null = null;
 let frameEl: HTMLDivElement | null = null;
 let tagEl: HTMLSpanElement | null = null;
 let panelEl: HTMLDivElement | null = null;
@@ -268,6 +271,66 @@ const takenKeys = new Set<string>();
 
 /** Своя песочница стилей: вёрстка сайта не должна ломать прицел, а рамки —
  *  лезть в саму страницу. Хост мышь не ловит, ловит только меню внутри. */
+
+/** Тёмные правила панели печатаются дважды: под медиазапрос — пока тема идёт
+ *  за системой, — и под класс хоста, когда человек выбрал её руками в
+ *  настройках. Иначе панель на странице осталась бы системной, а попап рядом
+ *  показывал бы выбранное: одно состояние, два разных ответа. */
+function darkCss(rules: string[]): string {
+  const scoped = (prefix: string): string => rules.map((r) => `${prefix} ${r}`).join('\n');
+  return [
+    '@media (prefers-color-scheme: dark) {',
+    scoped(':host(:not(.downy-light))'),
+    '}',
+    scoped(':host(.downy-dark)'),
+  ].join('\n');
+}
+
+const MENU_DARK = [
+  '.menu { background: #262a33; border-color: #363b47; }',
+  '.menu > button { color: #f2f3f5; }',
+  '.menu > button:hover { background: #313642; }',
+  '.menu > .busy { color: #a3a9b4; }',
+  '.menu > .busy:hover { background: none; }',
+  '.busy-spin { border-color: #313642; border-top-color: #f5c518; }',
+  '.split .main { color: #f2f3f5; }',
+  '.split:hover { background: #313642; }',
+  '.split .more { border-left-color: #414857; background: #2f3540; color: #f2f3f5; }',
+  '.split .more:hover { background: #f5c518; color: #1b1c20; }',
+  '.more-ring { border-color: #414857; border-top-color: #f5c518; }',
+];
+
+const PANEL_DARK = [
+  '.panel { background: #262a33; color: #f2f3f5; border-color: #363b47; }',
+  '.p-head, .p-item + .p-item, .p-foot { border-color: #363b47; }',
+  '.p-hint, .p-state, .p-meta, .p-foot, .p-cancel { color: #a3a9b4; }',
+  '.p-state.ok, .p-icon { color: #f5c518; }',
+  '.p-bar { background: #313642; }',
+  '.p-spin { border-color: #313642; border-top-color: #f5c518; }',
+  '.p-cancel:hover { background: #313642; }',
+];
+
+/** Тема, выбранная в настройках попапа. Панель обязана слушать тот же выбор:
+ *  иначе на светлой странице попап показывает выбранное, а панель — системное */
+let themeChoice: ThemeChoice = 'system';
+
+function applyPanelTheme(): void {
+  if (!shadowHost) return;
+  shadowHost.classList.toggle('downy-light', themeChoice === 'light');
+  shadowHost.classList.toggle('downy-dark', themeChoice === 'dark');
+}
+
+void chrome.storage.local.get({ [THEME_KEY]: 'system' }).then((v) => {
+  themeChoice = readThemeChoice(v[THEME_KEY]);
+  applyPanelTheme();
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[THEME_KEY]) return;
+  themeChoice = readThemeChoice(changes[THEME_KEY].newValue);
+  applyPanelTheme();
+});
+
 function ui(): ShadowRoot {
   if (shadow) return shadow;
   const host = document.createElement('div');
@@ -324,7 +387,12 @@ function ui(): ShadowRoot {
     '.more-ring { display: inline-block; width: 11px; height: 11px; border-radius: 50%;',
     '  border: 2px solid #dcdce0; border-top-color: #94740a; animation: spin .7s linear infinite; }',
     '.split .more.ready { animation: zoneReady .5s ease; }',
-    '@keyframes zoneReady { 0% { background: #f5c518; } 100% { background: #f0f0f2; } }',
+    /* Цвет покоя зоны качества — переменной, потому что анимацию под селектор
+       темы не завернуть: @keyframes живёт вне каскада */
+    ':host { --zone-rest: #f0f0f2; }',
+    '@media (prefers-color-scheme: dark) { :host(:not(.downy-light)) { --zone-rest: #2f3540; } }',
+    ':host(.downy-dark) { --zone-rest: #2f3540; }',
+    '@keyframes zoneReady { 0% { background: #f5c518; color: #1b1c20; } 100% { background: var(--zone-rest); } }',
     '.menu > button { display: block; width: 100%; padding: 6px 10px; border: none; border-radius: 6px;',
     '  background: none; color: #1b1c20; font: inherit; text-align: left; cursor: pointer; }',
     '.menu > button:hover { background: #ececef; }',
@@ -332,20 +400,7 @@ function ui(): ShadowRoot {
     '.menu > .busy:hover { background: none; }',
     '.busy-spin { flex: none; width: 12px; height: 12px; border-radius: 50%;',
     '  border: 2px solid #ececef; border-top-color: #f5c518; animation: spin .7s linear infinite; }',
-    '@media (prefers-color-scheme: dark) {',
-    '  .menu { background: #262a33; border-color: #363b47; }',
-    '  .menu > button { color: #f2f3f5; }',
-    '  .menu > button:hover { background: #313642; }',
-    '  .menu > .busy { color: #a3a9b4; }',
-    '  .menu > .busy:hover { background: none; }',
-    '  .busy-spin { border-color: #313642; border-top-color: #f5c518; }',
-    '  .split .main { color: #f2f3f5; }',
-    '  .split:hover { background: #313642; }',
-    '  .split .more { border-left-color: #414857; background: #2f3540; color: #f2f3f5; }',
-    '  .split .more:hover { background: #f5c518; color: #1b1c20; }',
-    '  .more-ring { border-color: #414857; border-top-color: #f5c518; }',
-    '  @keyframes zoneReady { 0% { background: #f5c518; color: #1b1c20; } 100% { background: #2f3540; } }',
-    '}',
+    darkCss(MENU_DARK),
     /* Уголок: панель Downy — один объект вместо россыпи карточек */
     '.corner { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column;',
     '  align-items: stretch; gap: 8px; width: 296px; max-width: calc(100vw - 28px); }',
@@ -389,15 +444,7 @@ function ui(): ShadowRoot {
     '.p-fill { height: 100%; width: 0; background: #f5c518;',
     '  box-shadow: 0 0 8px rgba(245, 197, 24, .5); transition: width .25s linear; }',
     '.p-foot { padding: 6px 11px; border-top: 1px solid #e3e4e8; font-size: 10.5px; color: #6e7278; }',
-    '@media (prefers-color-scheme: dark) {',
-    '  .panel { background: #262a33; color: #f2f3f5; border-color: #363b47; }',
-    '  .p-head, .p-item + .p-item, .p-foot { border-color: #363b47; }',
-    '  .p-hint, .p-state, .p-meta, .p-foot, .p-cancel { color: #a3a9b4; }',
-    '  .p-state.ok, .p-icon { color: #f5c518; }',
-    '  .p-bar { background: #313642; }',
-    '  .p-spin { border-color: #313642; border-top-color: #f5c518; }',
-    '  .p-cancel:hover { background: #313642; }',
-    '}',
+    darkCss(PANEL_DARK),
     '@media (prefers-reduced-motion: reduce) {',
     '  .panel, .panel.out { animation: none; }',
     '  .p-spin { animation: none; }',
@@ -405,6 +452,8 @@ function ui(): ShadowRoot {
     '}',
   ].join('\n');
   shadow.append(style);
+  shadowHost = host;
+  applyPanelTheme();
   document.documentElement.append(host);
   return shadow;
 }
