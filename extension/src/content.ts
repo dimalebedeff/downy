@@ -540,13 +540,13 @@ function frameLabel(t: PickTarget): string {
   if (isTaken(t)) return 'в загрузках';
   if (t.kind === 'image') {
     const size = pickSize(t.el);
-    if (t.postUrl) return `картинка${size} — или ролик`;
+    if (t.postUrl) return `картинка${size} — или видео`;
     // «Мелочь» — приговор размеру, а не зажатой клавише: под Alt в прицел
     // попадает и крупная картинка, и звать её мелочью — врать человеку
     return meetsThreshold(t.el) ? `картинка${size}` : `мелочь${size}`;
   }
   // Ленты бывают такие, что пост у видео не опознать — честнее сказать заранее
-  if (!t.url && !t.postUrl) return 'не понять, из какого поста ролик';
+  if (!t.url && !t.postUrl) return 'не понять, из какого поста видео';
   const via = t.url ? 'видео' : 'видео — yt-dlp, до 1080p';
   return t.altImageUrl ? `${via} — или картинка` : via;
 }
@@ -648,7 +648,7 @@ function menuRow(item: MenuItem): HTMLElement {
   });
   const more = document.createElement('button');
   more.className = 'more';
-  more.title = 'Выбрать качество';
+  more.title = 'Ищу качества';
   more.append(item.aside.hint);
   more.insertAdjacentHTML('beforeend', CHEVRON_SVG);
   more.addEventListener('click', (e) => {
@@ -1138,7 +1138,7 @@ function syncHead(): void {
     countEl.hidden = n === 0;
   }
   // Про правый клик иначе никто не узнает: подсказка живёт там же, где режим
-  if (hintEl) hintEl.textContent = pickerOn ? 'ПКМ — варианты · Alt — мелочь · ESC' : '';
+  if (hintEl) hintEl.textContent = pickerOn ? 'Правый клик — варианты · Alt — мелочь · ESC' : '';
 }
 
 function panel(): HTMLDivElement {

@@ -110,8 +110,8 @@ function refreshDot(): void {
   const kind = hardError || coappOk === false ? 'err' : coappOk ? 'ok' : 'unknown';
   statusDot.className = `dot dot-${kind}`;
   statusDot.title =
-    kind === 'ok' ? 'Скачивание работает — нажми, чтобы увидеть подробности'
-    : kind === 'err' ? 'Скачивание не работает — нажми'
+    kind === 'ok' ? 'Скачивание работает — нажмите, чтобы увидеть подробности'
+    : kind === 'err' ? 'Скачивание не работает — нажмите'
     : 'Проверяю…';
 }
 
@@ -277,7 +277,7 @@ function removeBtn(urls: string[]): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.className = 'card-remove';
   btn.textContent = '✕';
-  btn.title = 'Убрать из списка';
+  btn.title = 'Убрать находку';
   btn.addEventListener('click', async () => {
     await chrome.runtime.sendMessage({ type: 'remove-media', tabId: activeTab?.id, urls });
     void refresh();
@@ -374,11 +374,11 @@ function renderMedia(): void {
   ytdlpRow.hidden = showPageCards;
   if (!emptyEl.hidden) {
     if (ytdlpRow.parentElement !== emptyEl) emptyEl.append(ytdlpRow);
-    ytdlpBtn.textContent = 'Контент не нашелся?';
+    ytdlpBtn.textContent = 'Скачать страницу';
     ytdlpBtn.title = 'Скачать страницу через yt-dlp';
   } else {
     if (ytdlpRow.parentElement !== footerEl) footerEl.prepend(ytdlpRow);
-    ytdlpBtn.textContent = 'Контент не нашелся?';
+    ytdlpBtn.textContent = 'Скачать страницу';
     ytdlpBtn.title = 'Скачать страницу через yt-dlp';
   }
 
@@ -611,11 +611,11 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
   } else if (item.kind === 'direct' && group.members.length > 1) {
     // Варианты одного видео (разные качества) — один пункт с выбором
     select = document.createElement('select');
-    select.title = 'Вариант файла';
+    select.title = 'Качество';
     for (const [i, m] of group.members.entries()) {
       const opt = document.createElement('option');
       opt.value = m.url;
-      opt.textContent = fmtSize(m.size) || m.contentType?.split('/')[1] || `вариант ${i + 1}`;
+      opt.textContent = fmtSize(m.size) || m.contentType?.split('/')[1] || `качество ${i + 1}`;
       select.append(opt);
     }
   }
@@ -695,13 +695,13 @@ const ICON_CROSS =
   '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>';
 
 function cancelBtn(job: JobInfo): HTMLButtonElement {
-  return iconBtn('cancel-btn', ICON_CROSS, 'Отменить', () => {
+  return iconBtn('cancel-btn', ICON_CROSS, 'Отменить загрузку', () => {
     void chrome.runtime.sendMessage({ type: 'cancel-job', jobId: job.jobId });
   });
 }
 
 function pauseBtn(job: JobInfo): HTMLButtonElement {
-  return iconBtn('pause-btn', ICON_PAUSE, 'Пауза', () => {
+  return iconBtn('pause-btn', ICON_PAUSE, 'Приостановить', () => {
     void chrome.runtime.sendMessage({ type: 'pause-job', jobId: job.jobId });
   });
 }
@@ -878,7 +878,7 @@ let updating = false;
 function syncUpdateBtn(): void {
   if (updateBtn.hidden || updating) return;
   updateBtn.disabled = hasActiveJobs;
-  updateBtn.title = hasActiveJobs ? 'Дождись окончания загрузок' : '';
+  updateBtn.title = hasActiveJobs ? 'Дождитесь окончания загрузок' : '';
 }
 
 async function initUpdater(): Promise<void> {
@@ -948,7 +948,7 @@ function queueRow(job: JobInfo): HTMLLIElement {
     const handle = document.createElement('span');
     handle.className = 'drag-handle';
     handle.textContent = '⋮⋮';
-    handle.title = 'Тащи, чтобы поменять порядок';
+    handle.title = 'Перетаскиванием меняется порядок';
     row.append(handle);
     li.addEventListener('dragstart', (e) => {
       dragId = job.jobId;
@@ -1201,8 +1201,8 @@ async function init(): Promise<void> {
   // спрашиваем настоящее, а не то, что предложили в манифесте
   const shortcut = (await chrome.commands.getAll()).find((c) => c.name === 'toggle-picker')?.shortcut;
   pickBtn.title = shortcut
-    ? `Выбрать на странице (${shortcut}) — тыкай в видео и картинки, ESC — выход`
-    : 'Выбрать на странице — тыкай в видео и картинки, ESC — выход';
+    ? `Выбрать на странице (${shortcut}) — наводите на видео и картинки, ESC — выход`
+    : 'Выбрать на странице — наводите на видео и картинки, ESC — выход';
   pickBtn.addEventListener('click', () => {
     if (activeTab?.id == null) return;
     log('включаем прицел на странице');
@@ -1294,14 +1294,14 @@ async function init(): Promise<void> {
         noFfmpeg && noYtdlp ? 'Не скачается ничего: нет ffmpeg и yt-dlp.'
         : noFfmpeg ? 'Не соберутся стримы и не склеится видео со звуком: нет ffmpeg.'
         : 'Не скачаются ютуб и сложные сайты: нет yt-dlp.';
-      setBanner(`${loss}\nЗапусти npm run coapp:fetch-bins в папке проекта.`, true, true);
+      setBanner(`${loss}\nЗапустите npm run coapp:fetch-bins в папке проекта.`, true, true);
     } else {
       coappOk = true;
       setBanner(`Скачивание работает · v${status.info?.version}`, false, false);
     }
   } else {
     coappOk = false;
-    setBanner(`Не скачается ничего: Downy на компьютере не отвечает.\nУстанови: npm run coapp:install.\n${status?.error ?? ''}`.trim(), true, true);
+    setBanner(`Не скачается ничего: Downy на компьютере не отвечает.\nУстановите: npm run coapp:install.\n${status?.error ?? ''}`.trim(), true, true);
   }
   refreshDot();
 }

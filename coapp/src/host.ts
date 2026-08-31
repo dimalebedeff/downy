@@ -863,7 +863,7 @@ async function runUpdate(req: UpdateRequest): Promise<void> {
     sendMessage({ type: 'update', reqId: req.reqId, state, message });
   };
   if (jobs.size > 0) {
-    emitUpdate('error', 'Дождись окончания загрузок');
+    emitUpdate('error', 'Дождитесь окончания загрузок');
     return;
   }
   // npm install может идти минуту — не даём Chrome усыпить service worker

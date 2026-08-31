@@ -809,11 +809,11 @@ function getCoAppPort(): chrome.runtime.Port {
     coappPort = null;
     if (updateInProgress) {
       updateInProgress = false;
-      broadcastUpdateProgress('error', err ?? 'CoApp отключился во время обновления');
+      broadcastUpdateProgress('error', err ?? 'Downy на компьютере не отвечает');
     }
-    for (const resolve of pendingPickDir.values()) resolve({ dir: null, error: err ?? 'CoApp отключился' });
+    for (const resolve of pendingPickDir.values()) resolve({ dir: null, error: err ?? 'Downy на компьютере не отвечает' });
     pendingPickDir.clear();
-    for (const resolve of pendingPings) resolve({ ok: false, error: err ?? 'CoApp не установлен' });
+    for (const resolve of pendingPings) resolve({ ok: false, error: err ?? 'Downy на компьютере не отвечает' });
     pendingPings.clear();
     // Дадим шанс перезапросить кадры при следующем открытии попапа
     for (const { url } of pendingThumbs.values()) thumbTried.delete(url);
@@ -831,10 +831,10 @@ function getCoAppPort(): chrome.runtime.Port {
         if (jobRequests.has(job.jobId) && !job.noQueue) {
           job.state = 'paused';
           job.pausedBy = 'dropped';
-          job.message = err ?? 'Связь с CoApp оборвалась';
+          job.message = err ?? 'Downy на компьютере не отвечает';
         } else {
           job.state = 'error';
-          job.message = err ?? 'CoApp отключился';
+          job.message = err ?? 'Downy на компьютере не отвечает';
         }
       }
     }
@@ -913,10 +913,10 @@ function pingCoApp(): Promise<{ ok: boolean; info?: PongEvent; error?: string }>
     };
     // Хост однопоточный: пока он парсит плейлист или разбирает вывод yt-dlp,
     // ответ на ping ждёт своей очереди. Три секунды тут ловили живого помощника
-    const timer = setTimeout(() => done({ ok: false, error: 'CoApp не ответил за 8 секунд' }), 8000);
+    const timer = setTimeout(() => done({ ok: false, error: 'Downy на компьютере не отвечает' }), 8000);
     pendingPings.add(done);
     const sent = sendToCoApp({ type: 'ping' });
-    if (!sent.ok) done({ ok: false, error: sent.error ?? 'CoApp не установлен' });
+    if (!sent.ok) done({ ok: false, error: sent.error ?? 'Downy на компьютере не отвечает' });
   });
 }
 
@@ -948,7 +948,7 @@ function pickDirDialog(current?: string): Promise<{ dir: string | null; error?: 
     const sent = sendToCoApp({ type: 'pick_dir', reqId, current });
     if (!sent.ok) {
       pendingPickDir.delete(reqId);
-      resolve({ dir: null, error: sent.error ?? 'CoApp недоступен' });
+      resolve({ dir: null, error: sent.error ?? 'Downy на компьютере не отвечает' });
     }
     // Страховка: если CoApp так и не ответил, не держим промис вечно
     setTimeout(() => {
@@ -1164,7 +1164,7 @@ function hasActiveJobs(): boolean {
 
 async function runUpdate(): Promise<{ ok: boolean; error?: string }> {
   if (updateInProgress) return { ok: true };
-  if (hasActiveJobs()) return { ok: false, error: 'Дождись окончания загрузок' };
+  if (hasActiveJobs()) return { ok: false, error: 'Дождитесь окончания загрузок' };
   const status = await checkUpdate();
   if (!status.available || !status.tag) return { ok: false, error: 'Обновление не найдено' };
   const res = sendToCoApp({ type: 'update', reqId: crypto.randomUUID(), tag: status.tag });
@@ -1396,7 +1396,7 @@ async function handlePick(
   if (!pageUrl) {
     // В ленте адрес поста не всегда достаётся из разметки; адрес самой ленты
     // yt-dlp отвергает, поэтому не делаем вид, что загрузка началась
-    return { ok: false, error: 'Не нашёл, к какому посту относится ролик — открой пост и качай оттуда' };
+    return { ok: false, error: 'Не понять, к какому посту относится видео. Откройте пост и скачайте оттуда.' };
   }
   if (!picked) {
     // Попап заказывает разведку заранее, а клик по странице её опережает.
@@ -1456,7 +1456,7 @@ function setupContextMenus(): void {
       quiet,
     );
     chrome.contextMenus.create(
-      { id: 'downy-page', title: 'Скачать видео с этой страницы (yt-dlp)', contexts: ['page'] },
+      { id: 'downy-page', title: 'Скачать видео с этой страницы через Downy', contexts: ['page'] },
       quiet,
     );
   });
