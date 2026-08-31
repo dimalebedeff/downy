@@ -16,11 +16,11 @@ describe('fmtSize', () => {
   });
 
   it('мегабайты и гигабайты с одним знаком', () => {
-    expect(fmtSize(12.3 * MB)).toBe('12.3 МБ');
-    expect(fmtSize(2.5 * GB)).toBe('2.5 ГБ');
+    expect(fmtSize(12.3 * MB)).toBe('12,3 МБ');
+    expect(fmtSize(2.5 * GB)).toBe('2,5 ГБ');
   });
 
-  it('мелкая картинка не превращается в «0.0 МБ»', () => {
+  it('мелкая картинка не превращается в «0,0 МБ»', () => {
     // Обложка с озона весила 47 КБ, а тост показывал ноль
     expect(fmtSize(47_674)).toBe('47 КБ');
     expect(fmtSize(21_774)).toBe('21 КБ');
@@ -30,25 +30,25 @@ describe('fmtSize', () => {
 describe('jobProgressView', () => {
   it('точный размер: скачано / всего, шкала по байтам', () => {
     const v = jobProgressView({ progress: null, bytes: 12.3 * MB, totalBytes: 480 * MB });
-    expect(v.text).toBe('12.3 МБ / 480.0 МБ');
+    expect(v.text).toBe('12,3 МБ / 480,0 МБ');
     expect(v.ratio).toBeCloseTo(12.3 / 480, 3);
   });
 
   it('прогресс по времени + байты без общего размера: оценка с тильдой', () => {
     const v = jobProgressView({ progress: 0.25, bytes: 45 * MB });
-    expect(v.text).toBe('45.0 МБ / ~180.0 МБ');
+    expect(v.text).toBe('45,0 МБ / ~180,0 МБ');
     expect(v.ratio).toBe(0.25);
   });
 
   it('оценка не строится на слишком маленьком прогрессе', () => {
     const v = jobProgressView({ progress: 0.005, bytes: 2 * MB });
-    expect(v.text).toBe('2.0 МБ');
+    expect(v.text).toBe('2,0 МБ');
     expect(v.ratio).toBe(0.005);
   });
 
   it('только байты: показываем сколько скачано, шкала неопределённая', () => {
     const v = jobProgressView({ progress: null, bytes: 7 * MB });
-    expect(v.text).toBe('7.0 МБ');
+    expect(v.text).toBe('7,0 МБ');
     expect(v.ratio).toBeNull();
   });
 
@@ -67,24 +67,24 @@ describe('jobProgressView', () => {
 
   it('прогресс есть и по байтам, и по времени — шкала по явному прогрессу', () => {
     const v = jobProgressView({ progress: 0.5, bytes: 10 * MB, totalBytes: 40 * MB });
-    expect(v.text).toBe('10.0 МБ / 40.0 МБ');
+    expect(v.text).toBe('10,0 МБ / 40,0 МБ');
     expect(v.ratio).toBe(0.5);
   });
 
   it('со скоростью — компактно: процент, скорость, остаток', () => {
     const v = jobProgressView({ progress: null, bytes: 120 * MB, totalBytes: 480 * MB, speedBps: 12.4 * MB });
-    expect(v.text).toBe(`25% · 12.4 МБ/с · ост. ${fmtEta((360 * MB) / (12.4 * MB))}`);
+    expect(v.text).toBe(`25% · 12,4 МБ/с · ост. ${fmtEta((360 * MB) / (12.4 * MB))}`);
     expect(v.ratio).toBeCloseTo(0.25, 3);
   });
 
   it('скорость без общего размера — процент и скорость, остаток по оценке', () => {
     const v = jobProgressView({ progress: 0.25, bytes: 45 * MB, speedBps: 3 * MB });
-    expect(v.text).toBe(`25% · 3.0 МБ/с · ост. ${fmtEta((135 * MB) / (3 * MB))}`);
+    expect(v.text).toBe(`25% · 3,0 МБ/с · ост. ${fmtEta((135 * MB) / (3 * MB))}`);
   });
 
   it('скорость есть, а меры прогресса нет — байты и скорость без остатка', () => {
     const v = jobProgressView({ progress: null, bytes: 7 * MB, speedBps: 2 * MB });
-    expect(v.text).toBe('7.0 МБ · 2.0 МБ/с');
+    expect(v.text).toBe('7,0 МБ · 2,0 МБ/с');
     expect(v.ratio).toBeNull();
   });
 });
@@ -96,7 +96,7 @@ describe('fmtSpeed', () => {
   });
 
   it('человеческие единицы', () => {
-    expect(fmtSpeed(12.4 * MB)).toBe('12.4 МБ/с');
+    expect(fmtSpeed(12.4 * MB)).toBe('12,4 МБ/с');
     expect(fmtSpeed(300 * 1024)).toBe('300 КБ/с');
   });
 });
@@ -117,5 +117,12 @@ describe('fmtEta', () => {
     expect(fmtEta(-5)).toBe('');
     expect(fmtEta(Infinity)).toBe('');
     expect(fmtEta(1e9)).toBe('');
+  });
+});
+
+describe('дробная часть по-русски', () => {
+  it('разделитель — запятая, как в остальном интерфейсе и в README', () => {
+    expect(fmtSize(12.3 * MB)).toContain(',');
+    expect(fmtSize(12.3 * MB)).not.toContain('.');
   });
 });

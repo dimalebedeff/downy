@@ -28,13 +28,13 @@ describe('qualityOptions', () => {
       audio(50 * MB),
       audio(30 * MB),
     ]);
-    expect(opts[0].label).toBe('1080p · ~350.0 МБ');
-    expect(opts[1].label).toBe('720p · ~150.0 МБ');
+    expect(opts[0].label).toBe('1080p · ~350,0 МБ');
+    expect(opts[1].label).toBe('720p · ~150,0 МБ');
   });
 
   it('муксованный формат (видео+звук) не добавляет аудио к весу', () => {
     const opts = qualityOptions([video(480, { hasAudio: true, sizeBytes: 80 * MB }), audio(50 * MB)]);
-    expect(opts[0].label).toBe('480p · ~80.0 МБ');
+    expect(opts[0].label).toBe('480p · ~80,0 МБ');
   });
 
   it('60fps попадает в метку, дробный fps округляется', () => {

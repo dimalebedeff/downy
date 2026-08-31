@@ -3,8 +3,10 @@
 export function fmtSize(bytes?: number): string {
   if (!bytes) return '';
   const mb = bytes / (1024 * 1024);
-  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} ГБ`;
-  if (mb >= 1) return `${mb.toFixed(1)} МБ`;
+  // Запятая, а не точка: интерфейс русский, и README обещает «27,4 МБ»
+  const one = (v: number): string => v.toFixed(1).replace('.', ',');
+  if (mb >= 1024) return `${one(mb / 1024)} ГБ`;
+  if (mb >= 1) return `${one(mb)} МБ`;
   return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
 }
 

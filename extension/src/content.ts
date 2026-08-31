@@ -749,7 +749,7 @@ function showAllOptions(t: PickTarget, x: number, y: number): void {
     items.push({
       label: 'Скачать видео',
       run: () => void send(video, { chosen: true }),
-      aside: { hint: 'Авто', run: () => void send(video, { wantVariants: true }) },
+      aside: { hint: 'Лучшее', run: () => void send(video, { wantVariants: true }) },
     });
     items.push({ label: 'Только звук', run: () => void send(video, { streams: 'audio', chosen: true }) });
     const poster = posterOf(t);
@@ -769,7 +769,7 @@ function showAllOptions(t: PickTarget, x: number, y: number): void {
       items.push({
         label: 'Скачать видео',
         run: () => void send(fromPost, { chosen: true }),
-        aside: { hint: 'Авто', run: () => void send(fromPost, { wantVariants: true }) },
+        aside: { hint: 'Лучшее', run: () => void send(fromPost, { wantVariants: true }) },
       });
     }
   }
@@ -784,7 +784,7 @@ function paintAside(label?: string, pending = false): void {
   if (!more) return;
   more.textContent = '';
   // «1080p · 24,7 МБ» → «1080p»: в зону влезает только само качество
-  more.append(label ? label.split(' · ')[0] : 'Авто');
+  more.append(label ? label.split(' · ')[0] : 'Лучшее');
   if (pending) {
     more.classList.add('pending');
     const ring = document.createElement('span');
