@@ -98,3 +98,17 @@ export function applyReorder(
 export function pausedLabel(pausedBy: JobInfo['pausedBy']): string {
   return pausedBy === 'dropped' ? 'оборвалось' : 'пауза';
 }
+
+/**
+ * Сколько ждать перед новой разведкой сайта, который уже отказал.
+ *
+ * Попап опрашивает фон каждые две секунды, и на сломанном сайте плоская
+ * минута превращалась в процесс качалки каждые полторы минуты всё время,
+ * пока открыт попап. Сайту, который отвечает бот-чеком, мы этим только
+ * подливаем: чем чаще стучим, тем дольше он не пускает.
+ */
+export function probeRetryDelay(failures: number): number {
+  const minute = 60_000;
+  const steps = [minute, 5 * minute, 15 * minute, 30 * minute];
+  return steps[Math.min(Math.max(failures, 1), steps.length) - 1];
+}

@@ -7,6 +7,7 @@ import {
   nextToStart,
   normalizeOrder,
   pausedLabel,
+  probeRetryDelay,
 } from '../src/lib/queue';
 import type { JobInfo } from '../src/lib/types';
 
@@ -156,5 +157,21 @@ describe('pausedLabel', () => {
     expect(pausedLabel('user')).toBe('пауза');
     expect(pausedLabel('preempt')).toBe('пауза');
     expect(pausedLabel(undefined)).toBe('пауза');
+  });
+});
+
+describe('probeRetryDelay', () => {
+  it('первый отказ перепробуем скоро — вдруг сеть моргнула', () => {
+    expect(probeRetryDelay(1)).toBe(60_000);
+  });
+
+  it('дальше ждём дольше: сайт уже сказал «нет» дважды', () => {
+    expect(probeRetryDelay(2)).toBeGreaterThan(probeRetryDelay(1));
+    expect(probeRetryDelay(3)).toBeGreaterThan(probeRetryDelay(2));
+  });
+
+  it('есть потолок: попап открыт часами, а мы не долбим сайт вечно чаще него', () => {
+    expect(probeRetryDelay(99)).toBe(probeRetryDelay(50));
+    expect(probeRetryDelay(99)).toBeLessThanOrEqual(30 * 60_000);
   });
 });

@@ -22,6 +22,11 @@ const BASE_ARGS = ['--newline', '--encoding', 'utf-8'];
 /** Ответ справки на путь: спрашиваем один раз, дальше из памяти */
 const commonArgsCache = new Map<string, string[]>();
 
+/** После обновления качалки набор флагов мог измениться — спросим заново */
+export function forgetYtdlpArgs(): void {
+  commonArgsCache.clear();
+}
+
 /** Знает ли эта сборка такой флаг. Неизвестный флаг — не предупреждение,
  *  а exit 2: yt-dlp не делает вообще ничего. */
 function supportsFlag(ytdlpPath: string, flag: string): boolean {

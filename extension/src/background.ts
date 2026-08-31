@@ -11,7 +11,7 @@ import {
 import { isLiveMpd, isProtectedMpd, looksLikeMpd, mpdDuration } from './lib/mpd';
 import { buildFilename, buildYtdlpStem } from './lib/filename';
 import { isNewerVersion, REPO } from './lib/update';
-import { applyReorder, isUnfinished, nextToStart, normalizeOrder } from './lib/queue';
+import { applyReorder, isUnfinished, nextToStart, normalizeOrder, probeRetryDelay } from './lib/queue';
 import { nextSpeed, type SpeedTrack } from './lib/speed';
 import { withCutSuffix } from './lib/cut';
 import { qualityOptions } from './lib/ytdlp-formats';
@@ -600,8 +600,8 @@ const probeQueue: string[] = [];
 
 /** Неудачную разведку помним недолго: сеть могла моргнуть, а вечное «нет
  *  качеств» из-за одного сбоя молча режет прицел до 1080p */
-const PROBE_ERROR_TTL_MS = 60_000;
-const probeFailedAt = new Map<string, number>();
+/** Когда последний раз отказали и сколько раз подряд — отсюда растёт пауза */
+const probeFailures = new Map<string, { at: number; count: number }>();
 
 /** Разведка форматов идёт секунды; столько прицел готов ждать ради качеств */
 const PROBE_WAIT_MS = 9000;
@@ -621,10 +621,12 @@ async function awaitProbe(pageUrl: string): Promise<ProbeState> {
 function ensureProbe(pageUrl: string): ProbeState {
   const cached = probeCache.get(pageUrl);
   if (cached) {
-    const failedAt = probeFailedAt.get(pageUrl);
-    if (cached.status !== 'error' || failedAt == null || Date.now() - failedAt < PROBE_ERROR_TTL_MS) return cached;
+    const failed = probeFailures.get(pageUrl);
+    const waited = failed ? Date.now() - failed.at : 0;
+    // Чем упрямее сайт отказывает, тем реже мы к нему возвращаемся
+    if (cached.status !== 'error' || !failed || waited < probeRetryDelay(failed.count)) return cached;
     probeCache.delete(pageUrl);
-    probeFailedAt.delete(pageUrl);
+    probeFailures.delete(pageUrl);
   }
   const pending: ProbeState = { status: 'pending' };
   probeCache.set(pageUrl, pending);
@@ -736,8 +738,8 @@ function getCoAppPort(): chrome.runtime.Port {
                 }) ?? undefined,
             },
       );
-      if (msg.ok) probeFailedAt.delete(url);
-      else probeFailedAt.set(url, Date.now());
+      if (msg.ok) probeFailures.delete(url);
+      else probeFailures.set(url, { at: Date.now(), count: (probeFailures.get(url)?.count ?? 0) + 1 });
       // Место освободилось — пускаем следующую из очереди
       pumpProbes();
       return;

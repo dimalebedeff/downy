@@ -11,6 +11,7 @@ import {
   killProcessTree,
   makeYtdlpStdoutHandler,
   uniquePath,
+  forgetYtdlpArgs,
   ytdlpCommonArgs,
 } from '../../shared/ytdlp';
 import { cookiesToHeader } from '../../shared/cookies';
@@ -1056,5 +1057,45 @@ readMessages((raw) => {
       break;
   }
 });
+
+// ---------- Свежесть качалки ----------
+
+/** Раз в неделю. Сайты ломают экстракторы куда чаще, но и обновление не
+ *  бесплатное: оно перекачивает бинарник и на минуту занимает сеть */
+const YTDLP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Держим качалку свежей сами. Раньше `-U` дёргался только при обновлении
+ * расширения — то есть месяцами не дёргался вовсе, и мы месяцами жили со
+ * сломанными экстракторами, которые апстрим чинил за пару дней.
+ *
+ * Строго при пустой очереди: обновление перезаписывает сам файл, и посреди
+ * загрузки это ловушка. Ошибка не фатальна — работаем тем, что есть.
+ */
+function refreshYtdlpIfStale(): void {
+  if (jobs.size > 0) return;
+  let age: number;
+  try {
+    age = Date.now() - fs.statSync(ytdlpPath).mtimeMs;
+  } catch {
+    return; // бинарника нет — чинить нечего, об этом скажет проверка версий
+  }
+  if (age < YTDLP_MAX_AGE_MS) return;
+  const days = Math.round(age / 86_400_000);
+  log('yt-dlp старше', days, 'дней — обновляю в фоне');
+  void runStep(ytdlpPath, ['-U'], coappRoot).then((err) => {
+    if (err) {
+      log('yt-dlp -U не удался (не критично):', err.slice(-200));
+      return;
+    }
+    // Обновились — прежний вердикт о бинарниках и их флагах протух
+    binsChecked = null;
+    forgetYtdlpArgs();
+    log('yt-dlp обновлён');
+  });
+}
+
+// Старт хоста — единственный момент, когда очередь заведомо пуста
+refreshYtdlpIfStale();
 
 log('coapp started, ffmpeg:', ffmpegPath, 'yt-dlp:', ytdlpPath);
