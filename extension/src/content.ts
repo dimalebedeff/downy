@@ -541,15 +541,26 @@ function pickAt(x: number, y: number): PickTarget | null {
   return image?.url ? { ...video, altImageUrl: image.url } : video;
 }
 
+/** Размер в подписи прицела. У <img> берём настоящий размер файла, а не
+ *  растянутый на экране: сразу видно, мелкая под курсором обложка или
+ *  полноразмерный снимок. Фон и svg своего размера не называют — там говорим
+ *  экранный: цифры рядом с «мелочью» нужнее, чем пустота. */
+function pickSize(el: Element): string {
+  if (el instanceof HTMLImageElement && el.naturalWidth) {
+    return ` ${el.naturalWidth}×${el.naturalHeight}`;
+  }
+  const r = el.getBoundingClientRect();
+  const w = Math.round(r.width);
+  const h = Math.round(r.height);
+  return w && h ? ` ${w}×${h}` : '';
+}
+
 function frameLabel(t: PickTarget): string {
   // Пометка ставится в момент старта, а не завершения: файл может ещё качаться,
   // поэтому говорим про список загрузок, а не про «скачано»
   if (isTaken(t)) return 'в загрузках';
   if (t.kind === 'image') {
-    // Настоящий размер файла, а не растянутый на экране: сразу видно, что
-    // под курсором мелкая обложка, а не полноразмерный снимок
-    const img = t.el instanceof HTMLImageElement ? t.el : null;
-    const size = img?.naturalWidth ? ` ${img.naturalWidth}×${img.naturalHeight}` : '';
+    const size = pickSize(t.el);
     if (t.postUrl) return `картинка${size} — или ролик`;
     // «Мелочь» — приговор размеру, а не зажатой клавише: под Alt в прицел
     // попадает и крупная картинка, и звать её мелочью — врать человеку
