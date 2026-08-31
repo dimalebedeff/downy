@@ -551,7 +551,16 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
   box-shadow: 0 0 18px var(--glow);
 }
 
-.empty-title { font-weight: 600; font-size: 13.5px; margin: 0 0 14px; }
+.empty-title { font-weight: 600; font-size: 13.5px; margin: 0 0 6px; }
+
+/* Здесь помочь нечем — но сказать почему обязаны */
+.empty-why {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  margin: 0 auto 14px;
+  max-width: 230px;
+}
 
 #empty .ytdlp-row { justify-content: center; }
 #empty #ytdlp-page {

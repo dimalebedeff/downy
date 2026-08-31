@@ -5,6 +5,7 @@
 // по сети, а прицел отдаёт такие ролики yt-dlp по адресу поста.
 
 import { backgroundImageUrl, bestFromSrcset, isPostLink, meetsPickThreshold } from './lib/pick';
+import { unsupportedReason } from './lib/unsupported';
 import { fmtEta, fmtSize, fmtSpeed } from './lib/progress';
 import { typeIconSvg, type FileKind } from './lib/media-icon';
 
@@ -296,6 +297,7 @@ function ui(): ShadowRoot {
     '.menu *, .panel *, .corner * { box-sizing: border-box; }',
     '.frame { position: fixed; border: 2px solid #f5c518; border-radius: 6px;',
     '  box-shadow: 0 0 14px rgba(245, 197, 24, .55); pointer-events: none; }',
+    '.p-note { padding: 6px 9px; font-size: 11px; line-height: 1.4; opacity: .72; max-width: 240px; }',
     '.frame.taken { border-color: #22c55e; box-shadow: 0 0 14px rgba(34, 197, 94, .5); }',
     '.tag { position: absolute; top: -11px; left: -2px; padding: 1px 6px; border-radius: 5px;',
     "  background: #f5c518; color: #1b1c20; font: 600 11px/1.5 'Downy Golos', system-ui, sans-serif; white-space: nowrap; }",
@@ -921,9 +923,16 @@ function setPicker(on: boolean): void {
   if (on) {
     // Панель — общий дом для подсказки прицела и строк загрузок
     if (TOP_FRAME) panel();
+    // На таких площадках прицел просто не найдёт медиа и выключится по клику,
+    // как будто сломался. Предупреждаем сразу, а не оставляем тыкать впустую
+    if (TOP_FRAME) {
+      const why = unsupportedReason(location.href);
+      if (why) showNote(why);
+    }
   } else {
     drawFrame(null);
     hovered = null;
+    hideNote();
   }
   syncHead();
   closePanelIfIdle();
@@ -1166,10 +1175,30 @@ function panel(): HTMLDivElement {
   return panelEl;
 }
 
+/** Строка «здесь не выйдет» в панели: не ошибка загрузки, а объяснение, чтобы
+ *  человек не искал, что он сделал не так. Живёт, пока прицел включён. */
+let noteEl: HTMLDivElement | null = null;
+
+function showNote(text: string): void {
+  const root = panel();
+  if (!noteEl) {
+    noteEl = document.createElement('div');
+    noteEl.className = 'p-note';
+    root.append(noteEl);
+  }
+  noteEl.textContent = text;
+}
+
+function hideNote(): void {
+  noteEl?.remove();
+  noteEl = null;
+}
+
 /** Блок уходит, когда рассказывать больше не о чем */
 function closePanelIfIdle(): void {
   if (!panelEl || pickerOn) return;
   if (rows.size > 0 || footEl) return;
+  hideNote();
   const gone = panelEl;
   panelEl = null;
   listEl = countEl = hintEl = null;

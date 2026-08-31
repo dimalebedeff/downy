@@ -8,6 +8,7 @@ import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
 import { diffJobs } from '../lib/jobs-diff';
 import { isUnfinished, mergeVisibleOrder, pausedLabel } from '../lib/queue';
+import { unsupportedReason } from '../lib/unsupported';
 import { qualityOptions } from '../lib/ytdlp-formats';
 
 type MediaGroup = ReturnType<typeof groupMediaItems>[number];
@@ -16,6 +17,7 @@ const $ = <T extends HTMLElement>(sel: string): T => document.querySelector(sel)
 
 const mediaList = $<HTMLUListElement>('#media-list');
 const emptyEl = $<HTMLDivElement>('#empty');
+const emptyWhyEl = $<HTMLParagraphElement>('#empty-why');
 const jobsSection = $<HTMLElement>('#jobs-section');
 const jobsList = $<HTMLUListElement>('#jobs-list');
 const clearJobsBtn = $<HTMLButtonElement>('#clear-jobs');
@@ -331,6 +333,11 @@ function renderMedia(): void {
   );
   const showPageCards = groups.length === 0 && currentPageVideos.length > 0;
   emptyEl.hidden = groups.length > 0 || showPageCards;
+  // Пустой экран без объяснения читается как «сломалось». Если площадка
+  // из тех, где мы бессильны, — говорим об этом прямо, а не молчим
+  const why = activeTab?.url ? unsupportedReason(activeTab.url) : null;
+  emptyWhyEl.textContent = why ?? '';
+  emptyWhyEl.hidden = why == null;
   refreshDot();
 
   // yt-dlp: звезда пустого экрана, скромная строчка — когда медиа есть.
