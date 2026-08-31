@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeAuthFailure } from '../src/lib/cookies';
 import { cookiesToHeader, toNetscapeCookieFile, type BrowserCookie } from '../../shared/cookies';
 
 const TAB = '\t';
@@ -93,32 +92,5 @@ describe('cookiesToHeader', () => {
   it('пустой ввод не превращаем в пустой заголовок', () => {
     expect(cookiesToHeader(undefined)).toBeUndefined();
     expect(cookiesToHeader('')).toBeUndefined();
-  });
-});
-
-describe('looksLikeAuthFailure', () => {
-  it('узнаёт отказы, которые лечатся входом', () => {
-    expect(looksLikeAuthFailure('ERROR: [instagram] Requested content is not available, login required')).toBe(true);
-    expect(looksLikeAuthFailure('Sign in to confirm you are not a bot')).toBe(true);
-    expect(looksLikeAuthFailure('ERROR: This video is private')).toBe(true);
-    expect(looksLikeAuthFailure('Video available to members only')).toBe(true);
-    expect(looksLikeAuthFailure('HTTP Error 403: Forbidden')).toBe(true);
-    expect(looksLikeAuthFailure('HTTP Error 401: Unauthorized')).toBe(true);
-    expect(looksLikeAuthFailure('Use --cookies-from-browser or --cookies for the authentication')).toBe(true);
-    expect(looksLikeAuthFailure('rate-limit reached or login required')).toBe(true);
-    expect(looksLikeAuthFailure('This video is age-restricted')).toBe(true);
-  });
-
-  it('обычные поломки куками не лечатся — не гоняем сессию зря', () => {
-    expect(looksLikeAuthFailure('ERROR: Unable to download webpage: timed out')).toBe(false);
-    expect(looksLikeAuthFailure('HTTP Error 404: Not Found')).toBe(false);
-    expect(looksLikeAuthFailure('ffmpeg exited with code 1')).toBe(false);
-    expect(looksLikeAuthFailure('Unsupported URL')).toBe(false);
-    expect(looksLikeAuthFailure('')).toBe(false);
-    expect(looksLikeAuthFailure(undefined)).toBe(false);
-  });
-
-  it('регистр не важен: сообщения приходят как придётся', () => {
-    expect(looksLikeAuthFailure('LOGIN REQUIRED')).toBe(true);
   });
 });

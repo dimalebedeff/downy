@@ -9,6 +9,7 @@ import { isProbablyVideo } from '../lib/media-detect';
 import { diffJobs } from '../lib/jobs-diff';
 import { isUnfinished, mergeVisibleOrder, pausedLabel } from '../lib/queue';
 import { unsupportedReason } from '../lib/unsupported';
+import { classifyYtdlpError } from '../lib/ytdlp-errors';
 import { qualityOptions } from '../lib/ytdlp-formats';
 
 type MediaGroup = ReturnType<typeof groupMediaItems>[number];
@@ -568,8 +569,11 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
     const why = document.createElement('div');
     why.className = 'card-warn';
     why.textContent = probeHint;
-    why.title = pv.probe?.status === 'error' ? pv.probe.error ?? '' : '';
-    if (!cookieBox?.checked) why.append(' ', cookieFixBtn());
+    const rawError = pv.probe?.status === 'error' ? pv.probe.error ?? '' : '';
+    why.title = rawError;
+    // Кнопка ведёт к тумблеру cookies — значит уместна только там, где дело
+    // во входе. При отсутствии движка JavaScript звать в настройки бессмысленно
+    if (classifyYtdlpError(rawError) === 'auth' && !cookieBox?.checked) why.append(' ', cookieFixBtn());
     body.append(why);
   }
 
@@ -1071,8 +1075,8 @@ function finishedRow(job: JobInfo): HTMLLIElement {
       msg.classList.add('job-hint');
       msg.textContent = job.hint;
       if (job.message) msg.title = job.message.slice(0, 300);
-      // Звать в настройки имеет смысл, только пока там выключено
-      if (!cookieBox?.checked) msg.append(' ', cookieFixBtn());
+      // Звать в настройки имеет смысл, только когда дело во входе и тумблер выключен
+      if (classifyYtdlpError(job.message) === 'auth' && !cookieBox?.checked) msg.append(' ', cookieFixBtn());
     } else {
       msg.textContent = job.message!.slice(0, 300);
     }

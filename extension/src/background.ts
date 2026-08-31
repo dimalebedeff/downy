@@ -17,7 +17,7 @@ import { withCutSuffix } from './lib/cut';
 import { qualityOptions } from './lib/ytdlp-formats';
 import { assetIds, imageStem, previewSiblings } from './lib/pick';
 import { pickBestMedia } from './lib/media-probe';
-import { authFailureHint, looksLikeAuthFailure } from './lib/cookies';
+import { explainYtdlpError, looksLikeAuthFailure } from './lib/ytdlp-errors';
 import { toNetscapeCookieFile, type BrowserCookie } from '../../shared/cookies';
 import type { ProbedMedia } from '../../shared/ffmpeg-info';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
@@ -729,7 +729,7 @@ function getCoAppPort(): chrome.runtime.Port {
               error: msg.error,
               // «Качеств нет» тут враньё: они есть, нас не пустили
               hint:
-                authFailureHint({
+                explainYtdlpError({
                   message: msg.error,
                   cookiesOn: cookieSetting,
                   cookiesTried: probedWithCookies.has(url),
@@ -789,7 +789,7 @@ function getCoAppPort(): chrome.runtime.Port {
     // Повторять нечем — тогда хотя бы объясним по-человечески, что случилось
     if (msg.state === 'error') {
       job.hint =
-        authFailureHint({ message: msg.message, cookiesOn: cookieSetting, cookiesTried: job.cookiesTried }) ??
+        explainYtdlpError({ message: msg.message, cookiesOn: cookieSetting, cookiesTried: job.cookiesTried }) ??
         undefined;
     }
     if (msg.state === 'done' || msg.state === 'error' || msg.state === 'canceled') {
