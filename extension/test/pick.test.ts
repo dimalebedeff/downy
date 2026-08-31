@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { assetIds, backgroundImageUrl, bestFromSrcset, imageStem, previewSiblings } from '../src/lib/pick';
+import {
+  assetIds,
+  backgroundImageUrl,
+  bestFromSrcset,
+  imageStem,
+  meetsPickThreshold,
+  previewSiblings,
+} from '../src/lib/pick';
 
 describe('bestFromSrcset', () => {
   it('берёт самую большую ширину, а не последнюю запись', () => {
@@ -165,5 +172,18 @@ describe('backgroundImageUrl', () => {
   it('кавычки вокруг адреса необязательны', () => {
     expect(backgroundImageUrl({ backgroundImage: "url('a.png')", backgroundRepeat: 'no-repeat' })).toBe('a.png');
     expect(backgroundImageUrl({ backgroundImage: 'url(b.png)', backgroundRepeat: 'no-repeat' })).toBe('b.png');
+  });
+});
+
+describe('meetsPickThreshold', () => {
+  it('картинка со стороной от порога проходит', () => {
+    expect(meetsPickThreshold(100, 100)).toBe(true);
+    expect(meetsPickThreshold(426, 178)).toBe(true);
+  });
+
+  it('короткая любой стороной — мелочь', () => {
+    expect(meetsPickThreshold(99, 400)).toBe(false);
+    expect(meetsPickThreshold(400, 99)).toBe(false);
+    expect(meetsPickThreshold(24, 24)).toBe(false);
   });
 });

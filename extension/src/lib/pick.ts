@@ -116,3 +116,15 @@ export function backgroundImageUrl(style: { backgroundImage: string; backgroundR
   if (!raw || raw.startsWith('data:')) return null;
   return raw;
 }
+
+/**
+ * Обычный порог прицела. Ниже него — иконки интерфейса, аватарки, значки:
+ * цеплять их по наведению значит мешать, а не помогать. Зажатый Alt порог
+ * снимает, но словом «мелочь» подписано именно то, что порог не прошло, —
+ * крупная картинка остаётся картинкой и с зажатой клавишей.
+ */
+export const MIN_PICK_SIZE = 100;
+
+export function meetsPickThreshold(width: number, height: number): boolean {
+  return width >= MIN_PICK_SIZE && height >= MIN_PICK_SIZE;
+}

@@ -4,7 +4,7 @@
 // Стримы через MSE (blob:) в первую часть не попадают — их видит background
 // по сети, а прицел отдаёт такие ролики yt-dlp по адресу поста.
 
-import { backgroundImageUrl, bestFromSrcset } from './lib/pick';
+import { backgroundImageUrl, bestFromSrcset, meetsPickThreshold } from './lib/pick';
 import { fmtEta, fmtSize, fmtSpeed } from './lib/progress';
 import { typeIconSvg, type FileKind } from './lib/media-icon';
 
@@ -204,8 +204,6 @@ if (TOP_FRAME) {
 // отличить друг от друга. Прицел заходит с другой стороны — тыкаешь в то, что
 // видишь. Режим липкий: картинки обычно таскают пачкой.
 
-/** Меньше этого — иконка интерфейса, а не контент; за такое цепляться нечего */
-const MIN_PICK_SIZE = 100;
 const IMAGE_FILE = /\.(jpe?g|png|webp|gif|avif|bmp)(\?|#|$)/i;
 
 interface PickTarget {
@@ -426,10 +424,14 @@ function setCursor(on: boolean): void {
  *  интерфейса, поэтому снимаем его только пока клавиша нажата. */
 let greedy = false;
 
-function bigEnough(el: Element): boolean {
-  if (greedy) return true;
+/** Прошёл бы элемент прицел без всякого Alt */
+function meetsThreshold(el: Element): boolean {
   const r = el.getBoundingClientRect();
-  return r.width >= MIN_PICK_SIZE && r.height >= MIN_PICK_SIZE;
+  return meetsPickThreshold(r.width, r.height);
+}
+
+function bigEnough(el: Element): boolean {
+  return greedy || meetsThreshold(el);
 }
 
 /** Самый крупный доступный адрес картинки: ссылка-обёртка обычно ведёт на
@@ -549,7 +551,9 @@ function frameLabel(t: PickTarget): string {
     const img = t.el instanceof HTMLImageElement ? t.el : null;
     const size = img?.naturalWidth ? ` ${img.naturalWidth}×${img.naturalHeight}` : '';
     if (t.postUrl) return `картинка${size} — или ролик`;
-    return greedy ? `мелочь${size}` : `картинка${size}`;
+    // «Мелочь» — приговор размеру, а не зажатой клавише: под Alt в прицел
+    // попадает и крупная картинка, и звать её мелочью — врать человеку
+    return meetsThreshold(t.el) ? `картинка${size}` : `мелочь${size}`;
   }
   // Ленты бывают такие, что пост у видео не опознать — честнее сказать заранее
   if (!t.url && !t.postUrl) return 'не понять, из какого поста ролик';
