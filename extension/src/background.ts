@@ -17,7 +17,7 @@ import { withCutSuffix } from './lib/cut';
 import { qualityOptions } from './lib/ytdlp-formats';
 import { assetIds, imageStem, previewSiblings } from './lib/pick';
 import { pickBestMedia } from './lib/media-probe';
-import { looksLikeAuthFailure } from './lib/cookies';
+import { authFailureHint, looksLikeAuthFailure } from './lib/cookies';
 import { toNetscapeCookieFile, type BrowserCookie } from '../../shared/cookies';
 import type { ProbedMedia } from '../../shared/ffmpeg-info';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
@@ -741,6 +741,12 @@ function getCoAppPort(): chrome.runtime.Port {
     // Отказали по входу — пробуем ещё раз, уже с куками. Сайт запоминаем,
     // чтобы в следующий раз не гонять человека через лишнюю неудачу
     if (msg.state === 'error' && retryWithCookies(job, msg.message)) return;
+    // Повторять нечем — тогда хотя бы объясним по-человечески, что случилось
+    if (msg.state === 'error') {
+      job.hint =
+        authFailureHint({ message: msg.message, cookiesOn: cookieSetting, cookiesTried: job.cookiesTried }) ??
+        undefined;
+    }
     if (msg.state === 'done' || msg.state === 'error' || msg.state === 'canceled') {
       job.finishedAt = Date.now();
       jobRequests.delete(msg.jobId);

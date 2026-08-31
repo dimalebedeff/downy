@@ -1372,9 +1372,11 @@ function updateJob(job: PageJob): void {
   } else {
     row.fill.style.width = '0%';
     row.state.className = 'p-state err';
-    row.state.textContent = 'ошибка';
-    row.node.title = job.message ?? '';
-    dropRow(job.jobId, 6000);
+    // Отказ по входу зовём тем же словом, что и попап: одно состояние —
+    // одно название, где бы человек на него ни наткнулся
+    row.state.textContent = job.hint ? 'нужны cookies' : 'ошибка';
+    row.node.title = job.hint ?? job.message ?? '';
+    dropRow(job.jobId, job.hint ? 9000 : 6000);
   }
 }
 
@@ -1388,4 +1390,6 @@ interface PageJob {
   speedBps?: number;
   mediaKind?: string;
   message?: string;
+  /** Человеческое объяснение отказа — приезжает из фона вместе с ошибкой */
+  hint?: string;
 }

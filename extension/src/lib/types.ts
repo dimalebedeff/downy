@@ -55,6 +55,8 @@ export interface JobInfo {
   usedCookies?: boolean;
   /** Отказ уже пробовали лечить куками: второй раз не помогут */
   cookiesTried?: boolean;
+  /** Человеческое объяснение ошибки вместо английской ругани качалки */
+  hint?: string;
   /** Мимо очереди (обложки): мелочь не должна ждать двухгиговое кино */
   noQueue?: boolean;
   bytes?: number;

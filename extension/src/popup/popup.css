@@ -464,6 +464,24 @@ select {
    Длинный текст тает под градиентной шторкой перед стрелкой; шторка лежит
    поверх текста и не трогает рамку (маска на самом селекте резала обводку) */
 .card-actions select { text-overflow: clip; }
+/* Ожидание рисуем одинаково везде: --chip и --accent дают ровно те цвета,
+   что захардкожены у спиннера в панели на странице */
+.spin {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--chip);
+  border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation: none; }
+}
+
 .select-wrap { position: relative; display: flex; min-width: 0; }
 .select-wrap select { width: 100%; }
 .select-wrap::after {
@@ -584,6 +602,16 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 0;
   overflow: hidden;
   word-break: break-all;
 }
+
+/* Объяснение — не ругань качалки: это подсказка, что делать дальше, и рвать
+   её по буквам незачем */
+.job-hint {
+  color: var(--muted);
+  -webkit-line-clamp: 3;
+  word-break: normal;
+}
+
+.inline-fix { font-size: 11px; vertical-align: baseline; }
 
 /* ---------- Пустое состояние: yt-dlp — главная звезда ---------- */
 

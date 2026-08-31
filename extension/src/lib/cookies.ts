@@ -27,3 +27,17 @@ export function looksLikeAuthFailure(message?: string): boolean {
   if (!message) return false;
   return AUTH_FAILURE.some((re) => re.test(message));
 }
+
+/**
+ * Что сказать человеку вместо английской ругани качалки. Сайт отказал по
+ * входу — значит либо тумблер выключен и о нём никто не знает, либо cookies
+ * уже уехали и не помогли. Разные беды, разные ответы; во всех остальных
+ * случаях молчим, чтобы не приплетать cookies к обычной сетевой поломке.
+ */
+export function authFailureHint(o: { message?: string; cookiesOn: boolean; cookiesTried?: boolean }): string | null {
+  if (!looksLikeAuthFailure(o.message)) return null;
+  if (!o.cookiesOn) return 'Сайт отдаёт файл только своим. Включите cookies в настройках расширения.';
+  // Тумблер включён, но повтор ещё впереди — вот-вот сходим с cookies сами
+  if (!o.cookiesTried) return null;
+  return 'Сайт не пустил даже с вашими cookies — проверьте, вошли ли вы на нём в браузере.';
+}

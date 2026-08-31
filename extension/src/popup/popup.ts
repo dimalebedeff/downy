@@ -18,6 +18,8 @@ const $ = <T extends HTMLElement>(sel: string): T => document.querySelector(sel)
 const mediaList = $<HTMLUListElement>('#media-list');
 const emptyEl = $<HTMLDivElement>('#empty');
 const emptyWhyEl = $<HTMLParagraphElement>('#empty-why');
+/** Заполняется при инициализации: строка ошибки спрашивает у неё, включено ли */
+let cookieBox: HTMLInputElement | null = null;
 const jobsSection = $<HTMLElement>('#jobs-section');
 const jobsList = $<HTMLUListElement>('#jobs-list');
 const clearJobsBtn = $<HTMLButtonElement>('#clear-jobs');
@@ -236,6 +238,15 @@ function downloadCover(item: MediaItem, coverUrl: string): void {
 }
 
 /** Обёртка селекта — рисует шторку затухания текста, не трогая рамку. */
+/** Фирменный спиннер: тот же круг с жёлтым сектором, что крутится в панели
+ *  на странице. Одно ожидание — один значок во всех частях интерфейса. */
+function spinner(title: string): HTMLSpanElement {
+  const el = document.createElement('span');
+  el.className = 'spin';
+  el.title = title;
+  return el;
+}
+
 function wrapSelect(select: HTMLSelectElement): HTMLSpanElement {
   const wrap = document.createElement('span');
   wrap.className = 'select-wrap';
@@ -473,12 +484,6 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
       opt.dataset.q = q.label.split(' · ')[0];
       select.append(opt);
     }
-  } else if (pv.probe?.status === 'pending') {
-    // Точки бегут интервалом в init — селект живой, пока идёт разведка
-    const opt = new Option('Пробив', '', true, true);
-    opt.disabled = true;
-    opt.dataset.probing = '1';
-    select.append(opt);
   }
 
   const btn = document.createElement('button');
@@ -531,7 +536,12 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
     ]);
   });
 
-  row.append(btn, wrapSelect(select), kebab);
+  // Разведка идёт — крутим спиннер вплотную к списку качеств, а не подменяем
+  // им сам список: «Лучшее» работает сразу, ждать ради загрузки незачем
+  const probing = !probeReady && pv.probe?.status === 'pending';
+  row.append(btn, wrapSelect(select));
+  if (probing) row.append(spinner('Ищу качества'));
+  row.append(kebab);
   body.append(row);
 
   li.append(thumbBox, body, removeBtn([pv.url]));
@@ -1023,14 +1033,39 @@ function finishedRow(job: JobInfo): HTMLLIElement {
 
   li.append(row);
 
-  if (job.state === 'error' && job.message) {
+  if (job.state === 'error' && (job.hint || job.message)) {
     const msg = document.createElement('div');
     msg.className = 'job-msg';
-    msg.textContent = job.message.slice(0, 300);
+    if (job.hint) {
+      // Объяснение вместо ругани качалки; саму ругань прячем в подсказку —
+      // она нужна, когда придёшь разбираться, а не когда просто не скачалось
+      msg.classList.add('job-hint');
+      msg.textContent = job.hint;
+      if (job.message) msg.title = job.message.slice(0, 300);
+      // Звать в настройки имеет смысл, только пока там выключено
+      if (!cookieBox?.checked) msg.append(' ', cookieFixBtn());
+    } else {
+      msg.textContent = job.message!.slice(0, 300);
+    }
     li.append(msg);
   }
 
   return li;
+}
+
+/** Дорога от ошибки к тумблеру в один клик: иначе объяснение говорит, что
+ *  делать, но не помогает это сделать */
+function cookieFixBtn(): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'link-btn inline-fix';
+  b.textContent = 'Включить';
+  b.addEventListener('click', () => {
+    settingsPanel.hidden = false;
+    cookieBox?.focus();
+    cookieBox?.scrollIntoView({ block: 'nearest' });
+  });
+  return b;
 }
 
 function renderJobs(): void {
@@ -1106,14 +1141,6 @@ async function init(): Promise<void> {
   }, 2000);
   window.addEventListener('unload', () => clearInterval(mediaPoll));
 
-  // Бегущие точки «Пробив…», пока едет разведка качеств
-  let probeDotsN = 0;
-  setInterval(() => {
-    probeDotsN = (probeDotsN + 1) % 4;
-    const text = `Пробив${'.'.repeat(probeDotsN)}`;
-    for (const el of document.querySelectorAll('[data-probing]')) el.textContent = text;
-  }, 400);
-
   // Перетаскивание строк очереди: тащим над списком, порядок уедет на dragend
   jobsList.addEventListener('dragover', (e) => {
     if (!dragId) return;
@@ -1179,21 +1206,22 @@ async function init(): Promise<void> {
 
   // Право на куки спрашиваем ровно в момент щелчка: пока тумблер выключен,
   // расширение и не может их прочитать — не «не читает», а не имеет права
-  const cookieBox = $<HTMLInputElement>('#send-cookies');
+  const box = $<HTMLInputElement>('#send-cookies');
+  cookieBox = box;
   const { sendCookies } = await chrome.storage.local.get({ sendCookies: false });
   const granted = await chrome.permissions.contains({ permissions: ['cookies'] });
-  cookieBox.checked = Boolean(sendCookies) && granted;
+  box.checked = Boolean(sendCookies) && granted;
   if (sendCookies && !granted) void chrome.storage.local.set({ sendCookies: false });
-  cookieBox.addEventListener('change', () => {
+  box.addEventListener('change', () => {
     void (async () => {
-      if (!cookieBox.checked) {
+      if (!box.checked) {
         void chrome.storage.local.set({ sendCookies: false });
         // Право забираем обратно: выключено должно значить «доступа нет»
         await chrome.permissions.remove({ permissions: ['cookies'] }).catch(() => false);
         return;
       }
       const ok = await chrome.permissions.request({ permissions: ['cookies'] }).catch(() => false);
-      cookieBox.checked = ok;
+      box.checked = ok;
       void chrome.storage.local.set({ sendCookies: ok });
     })();
   });
