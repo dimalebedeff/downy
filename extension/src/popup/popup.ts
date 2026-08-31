@@ -238,19 +238,24 @@ function downloadCover(item: MediaItem, coverUrl: string): void {
 }
 
 /** Обёртка селекта — рисует шторку затухания текста, не трогая рамку. */
-/** Фирменный спиннер: тот же круг с жёлтым сектором, что крутится в панели
- *  на странице. Одно ожидание — один значок во всех частях интерфейса. */
-function spinner(title: string): HTMLSpanElement {
-  const el = document.createElement('span');
-  el.className = 'spin';
-  el.title = title;
-  return el;
-}
-
-function wrapSelect(select: HTMLSelectElement): HTMLSpanElement {
+function wrapSelect(select: HTMLSelectElement, probing = false): HTMLSpanElement {
   const wrap = document.createElement('span');
   wrap.className = 'select-wrap';
   wrap.append(select);
+  if (!probing) return wrap;
+
+  // Слой поверх списка: под ним живой «Лучшее», а на нём — слово и заливка
+  wrap.classList.add('is-probing');
+  wrap.title = 'Ищу качества';
+  const veil = document.createElement('span');
+  veil.className = 'probe-veil';
+  const fill = document.createElement('span');
+  fill.className = 'probe-fill';
+  const word = document.createElement('span');
+  word.className = 'probe-word';
+  word.textContent = 'Пробив…';
+  veil.append(fill, word);
+  wrap.append(veil);
   return wrap;
 }
 
@@ -485,6 +490,9 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
       select.append(opt);
     }
   }
+  // Пока едет разведка, список остаётся рабочим («Лучшее» качает сразу), а
+  // сверху ложится слой с «Пробив…»: внутрь <option> анимацию не положить
+  const probing = !probeReady && pv.probe?.status === 'pending';
 
   const btn = document.createElement('button');
   btn.className = 'primary';
@@ -536,12 +544,7 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
     ]);
   });
 
-  // Разведка идёт — крутим спиннер вплотную к списку качеств, а не подменяем
-  // им сам список: «Лучшее» работает сразу, ждать ради загрузки незачем
-  const probing = !probeReady && pv.probe?.status === 'pending';
-  row.append(btn, wrapSelect(select));
-  if (probing) row.append(spinner('Ищу качества'));
-  row.append(kebab);
+  row.append(btn, wrapSelect(select, probing), kebab);
   body.append(row);
 
   li.append(thumbBox, body, removeBtn([pv.url]));

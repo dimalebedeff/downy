@@ -33,6 +33,8 @@
   --err: #dc2626;
   --ok: #94740a;
   --glow: rgba(245, 197, 24, .38);
+  /* Заливка разведки: --glow светит по тёмному, а тут надо читаться и на белом */
+  --probe-wash: rgba(245, 197, 24, .5);
   --shadow: 0 1px 3px rgba(20, 20, 25, .07);
   --menu-shadow: 0 8px 28px rgba(20, 20, 25, .16);
 }
@@ -464,22 +466,46 @@ select {
    Длинный текст тает под градиентной шторкой перед стрелкой; шторка лежит
    поверх текста и не трогает рамку (маска на самом селекте резала обводку) */
 .card-actions select { text-overflow: clip; }
-/* Ожидание рисуем одинаково везде: --chip и --accent дают ровно те цвета,
-   что захардкожены у спиннера в панели на странице */
-.spin {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid var(--chip);
-  border-top-color: var(--accent);
-  animation: spin .7s linear infinite;
+/* Разведка качеств. Слой поверх списка: <option> держит только текст, поэтому
+   слово и заливка живут отдельным слоем, а сам список под ним остаётся рабочим */
+.probe-veil {
+  position: absolute;
+  inset: 1px;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--fg);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  /* Клики проходят насквозь: под слоем живой список с «Лучшее» */
+  pointer-events: none;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+.probe-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--probe-wash);
+  animation: probe-fill 1.8s ease-in-out infinite;
+}
+
+.probe-word { position: relative; }
+
+@keyframes probe-fill {
+  0% { width: 0; opacity: .9; }
+  70% { width: 100%; opacity: .9; }
+  100% { width: 100%; opacity: 0; }
+}
+
+/* Заглушка под стрелкой закрывала бы слово справа — на время разведки убираем */
+.select-wrap.is-probing::after { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .spin { animation: none; }
+  .probe-fill { animation: none; width: 100%; opacity: .5; }
 }
 
 .select-wrap { position: relative; display: flex; min-width: 0; }
