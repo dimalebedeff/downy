@@ -176,37 +176,69 @@ h2 {
   text-decoration: none;
 }
 .version:hover { color: var(--accent-deep); text-decoration: underline; }
-.ask-dir {
+/* Строка с галкой. Отступ слева у пояснений считается отсюда: 16 (галка) + 7 */
+.check-row {
   display: flex;
   align-items: center;
-  gap: 5px;
-  /* Относится к полю выше — стоит вплотную, чтобы это было видно без слов */
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 11px;
+  gap: 7px;
   cursor: pointer;
   user-select: none;
 }
-/* Кастомный чекбокс: нативный не скруглить */
-.ask-dir input {
+
+.ask-dir {
+  /* Относится к полю выше — стоит вплотную, чтобы это было видно без слов */
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+/* ---------- Галки ---------- */
+
+/* Стиль висит на самом типе поля, а не на классе строки: новая галка получает
+   вид сразу, и разъехаться им больше негде. Нативную не скруглить и не
+   покрасить — рисуем свою. Радиус 5 при стороне 16 держит квадрат квадратом:
+   у полей и кнопок рядом он 8, и вся панель читается одной семьёй. */
+input[type='checkbox'] {
   appearance: none;
-  width: 15px;
-  height: 15px;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  flex: none;
   margin: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1.5px solid var(--border);
+  border-radius: 5px;
   background: var(--bg);
   display: grid;
   place-content: center;
   cursor: pointer;
+  transition: background .13s ease, border-color .13s ease, box-shadow .13s ease;
 }
-.ask-dir input:checked { background: var(--accent); border-color: var(--accent); }
-.ask-dir input:checked::before {
+
+input[type='checkbox']:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+input[type='checkbox']:checked::before {
   content: '';
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   background: var(--accent-ink);
   clip-path: polygon(13% 47%, 34% 68%, 87% 12%, 100% 25%, 34% 93%, 0 60%);
+}
+
+input[type='checkbox']:hover:not(:checked) { border-color: var(--muted); }
+
+/* Системный контур не знает ни про жёлтый, ни про радиус — рисуем свой тем же
+   свечением, что у идущей загрузки. Убирать совсем нельзя: с клавиатуры иначе
+   не видно, куда попал */
+input[type='checkbox']:focus { outline: none; }
+input[type='checkbox']:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--glow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  input[type='checkbox'] { transition: none; }
 }
 
 /* ---------- Список медиа ---------- */
@@ -315,14 +347,15 @@ ul { list-style: none; margin: 0; padding: 0; }
   text-overflow: ellipsis;
 }
 
-.cookie-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; cursor: pointer; }
+.cookie-row { margin-top: 12px; font-size: 12.5px; font-weight: 600; }
 
-/* Риск называем рядом с тумблером, а не прячем в подсказку */
+/* Риск называем рядом с галкой, а не прячем в подсказку. Отступ ровно под
+   текстом строки выше — 16 на галку и 7 на зазор */
 .cookie-why {
-  margin: 4px 0 0 20px;
+  margin: 4px 0 0 23px;
   color: var(--muted);
   font-size: 11px;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .job-key { font-size: 11px; opacity: .75; cursor: default; }
