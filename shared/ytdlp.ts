@@ -16,7 +16,19 @@ export const HLS_CONCURRENCY = '8';
 
 // Без --encoding yt-dlp пишет в stdout в кодировке консоли (cp1251) — кириллица
 // в путях превращается в кракозябры, и «показать в папке» не находит файл
-export const YTDLP_COMMON_ARGS = ['--newline', '--encoding', 'utf-8'];
+/**
+ * Ютуб гоняет JS-челлендж, и без движка JavaScript свежий yt-dlp не проходит
+ * его вовсе: «The page needs to be reloaded» вместо списка качеств. Движок у
+ * нас уже есть — тот самый Node, на котором работает и сам хост, поэтому
+ * передаём точный путь к нему, а не надеемся на PATH.
+ */
+export const YTDLP_COMMON_ARGS = [
+  '--newline',
+  '--encoding',
+  'utf-8',
+  '--js-runtimes',
+  `node:${process.execPath}`,
+];
 
 export function findBin(binDir: string, name: string): string {
   const local = path.join(binDir, `${name}.exe`);
