@@ -176,11 +176,15 @@ h2 {
   text-decoration: none;
 }
 .version:hover { color: var(--accent-deep); text-decoration: underline; }
-/* Строка с галкой. Отступ слева у пояснений считается отсюда: 16 (галка) + 7 */
+/* Строка с галкой. Высота строки равна росту галки — иначе текст центрируется
+   в своей коробке (у 12.5px она 18.1, у 11.5px — 16.7), а галка в своей, и
+   подпись уезжает вверх на пиксель-полтора. Отступ слева у пояснений
+   считается отсюда же: 16 на галку и 7 на зазор */
 .check-row {
   display: flex;
   align-items: center;
   gap: 7px;
+  line-height: 16px;
   cursor: pointer;
   user-select: none;
 }

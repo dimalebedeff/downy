@@ -939,7 +939,7 @@ function queueRow(job: JobInfo): HTMLLIElement {
     const key = document.createElement('span');
     key.className = 'job-key';
     key.textContent = '🔑';
-    key.title = 'На сайт ушли ваши куки — без них он отказался отдавать файл';
+    key.title = 'На сайт ушли ваши cookies — без них он отказался отдавать файл';
     row.append(key);
   }
 
