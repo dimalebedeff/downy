@@ -445,6 +445,10 @@ button:disabled { opacity: .5; cursor: default; }
 .kebab:hover { background: var(--chip); color: var(--fg); }
 
 select {
+  /* Стрелку рисуем сами: нативная стоит там, где решит браузер, и текст рядом
+     с ней приходится обрывать с запасом — отсюда и брался пустырь */
+  appearance: none;
+  -webkit-appearance: none;
   max-width: 140px;
   min-width: 0;
   font: inherit;
@@ -453,8 +457,8 @@ select {
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  /* Отступ справа — текст не упирается в стрелку и не режется */
-  padding: 4px 16px 4px 6px;
+  /* Слева — как у кнопок и полей рядом; справа ровно под свою стрелку */
+  padding: 4px 20px 4px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow: hidden;
@@ -464,6 +468,20 @@ select {
    Длинный текст тает под градиентной шторкой перед стрелкой; шторка лежит
    поверх текста и не трогает рамку (маска на самом селекте резала обводку) */
 .card-actions select { text-overflow: clip; }
+
+/* Своя стрелка: у неё известное место, поэтому текст обрывается вплотную к ней */
+.select-wrap::before {
+  content: '';
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
 /* Разведка качеств. Слой поверх списка: <option> держит только текст, поэтому
    слово и заливка живут отдельным слоем, а сам список под ним остаётся рабочим */
 .probe-veil {
@@ -514,7 +532,7 @@ select {
   top: 2px;
   bottom: 2px;
   right: 18px;
-  width: 18px;
+  width: 12px;
   background: linear-gradient(to right, transparent, var(--card));
   pointer-events: none;
 }
