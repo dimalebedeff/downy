@@ -716,7 +716,7 @@ function resumeBtn(job: JobInfo): HTMLButtonElement {
 function openBtn(outFile: string): HTMLButtonElement {
   const btn = smallBtn('icon-act-btn', '', 'Открыть', async () => {
     const res = await chrome.runtime.sendMessage({ type: 'open-file', path: outFile });
-    if (!res?.ok) showError(res?.error ?? 'Не удалось открыть файл');
+    if (!res?.ok) showError(res?.error ?? 'Не удалось открыть файл — возможно, его переместили или удалили');
   });
   btn.innerHTML =
     '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
@@ -731,7 +731,7 @@ function folderBtn(outFile: string): HTMLButtonElement {
   btn.title = 'Показать в папке';
   btn.addEventListener('click', async () => {
     const res = await chrome.runtime.sendMessage({ type: 'show-in-folder', path: outFile });
-    if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку');
+    if (!res?.ok) showError(res?.error ?? 'Не удалось открыть папку — возможно, её переместили или удалили');
   });
   return btn;
 }
@@ -865,7 +865,9 @@ function download(
             streams,
             cut,
           }),
-    item.kind === 'direct' ? 'Не удалось начать скачивание' : 'Downy на компьютере не отвечает',
+    item.kind === 'direct'
+      ? 'Не удалось начать скачивание. Проверьте зелёную точку в шапке — она скажет, всё ли на месте'
+      : 'Downy на компьютере не отвечает',
   );
 }
 
@@ -923,7 +925,7 @@ function onUpdateProgress(state: string, message?: string): void {
       updateBtn.disabled = false;
       updateBtn.textContent = 'Обновление не удалось — повторить';
       updateBtn.title = message ?? '';
-      showError(message ?? 'Обновление не удалось');
+      showError(message ?? 'Обновление не удалось. Подробности — в coapp.log в папке проекта');
       break;
     }
   }
@@ -1275,7 +1277,7 @@ async function init(): Promise<void> {
     try {
       const res = await chrome.runtime.sendMessage({ type: 'pick-out-dir', current: outDirInput.value.trim() });
       if (res?.dir) outDirInput.value = res.dir;
-      else if (res?.ok === false) showError(res.error ?? 'Не удалось открыть диалог выбора папки');
+      else if (res?.ok === false) showError(res.error ?? 'Выбор папки не открылся — впишите путь в поле выше вручную');
     } finally {
       browseBtn.disabled = false;
     }

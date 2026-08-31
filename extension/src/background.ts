@@ -1166,7 +1166,7 @@ async function runUpdate(): Promise<{ ok: boolean; error?: string }> {
   if (updateInProgress) return { ok: true };
   if (hasActiveJobs()) return { ok: false, error: 'Дождитесь окончания загрузок' };
   const status = await checkUpdate();
-  if (!status.available || !status.tag) return { ok: false, error: 'Обновление не найдено' };
+  if (!status.available || !status.tag) return { ok: false, error: 'Обновление не найдено — у вас уже свежая версия' };
   const res = sendToCoApp({ type: 'update', reqId: crypto.randomUUID(), tag: status.tag });
   if (res.ok) updateInProgress = true;
   return res;
@@ -1579,7 +1579,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
       case 'pick': {
         const tabId = sender.tab?.id ?? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
         if (tabId == null) {
-          sendResponse({ ok: false, error: 'Не понял, с какой вкладки' });
+          sendResponse({ ok: false, error: 'Не понять, с какой вкладки скачивать. Откройте страницу с видео и попробуйте снова' });
           break;
         }
         sendResponse(await handlePick(tabId, msg as unknown as PickMessage));
@@ -1676,7 +1676,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
       case 'pause-job': {
         const job = jobs.get(msg.jobId as string);
         if (!job) {
-          sendResponse({ ok: false, error: 'Загрузка не найдена' });
+          sendResponse({ ok: false, error: 'Загрузка не найдена — её уже убрали из списка' });
         } else if (job.state === 'running' || job.state === 'starting') {
           job.pausedBy = 'user';
           sendResponse(sendToCoApp({ type: 'pause', jobId: job.jobId }));

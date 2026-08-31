@@ -1372,8 +1372,9 @@ function updateJob(job: PageJob): void {
   } else {
     row.fill.style.width = '0%';
     row.state.className = 'p-state err';
-    // Отказ по входу зовём тем же словом, что и попап: одно состояние —
-    // одно название, где бы человек на него ни наткнулся
+    // Панель тесная, объяснению тут места нет — оно уходит в подсказку, а в
+    // строке остаётся короткий повод. В попапе наоборот: там под строкой
+    // помещается фраза целиком
     row.state.textContent = job.hint ? 'нужны cookies' : 'ошибка';
     row.node.title = job.hint ?? job.message ?? '';
     dropRow(job.jobId, job.hint ? 9000 : 6000);
