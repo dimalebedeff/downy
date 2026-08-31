@@ -300,10 +300,11 @@ async function addDirect(
   size?: number,
   pageTitle?: string,
   thumb?: string,
+  frameUrl?: string,
 ): Promise<void> {
   await restored;
   if (getTabItems(tabId).has(url)) {
-    upsertItem({ url, kind: 'direct', tabId, foundAt: Date.now(), contentType, size, thumb });
+    upsertItem({ url, kind: 'direct', tabId, foundAt: Date.now(), contentType, size, thumb, frameUrl });
     return;
   }
   const info = await pageInfo(tabId);
@@ -315,12 +316,19 @@ async function addDirect(
     contentType,
     size,
     thumb,
+    frameUrl,
     pageUrl: info.pageUrl,
     pageTitle: pageTitle ?? info.pageTitle,
   });
 }
 
-async function addHls(tabId: number, url: string, pageTitle?: string, thumb?: string): Promise<void> {
+async function addHls(
+  tabId: number,
+  url: string,
+  pageTitle?: string,
+  thumb?: string,
+  frameUrl?: string,
+): Promise<void> {
   await restored;
   if (tabVariantUrls.get(tabId)?.has(url)) return;
   if (getTabItems(tabId).has(url)) return;
@@ -339,6 +347,7 @@ async function addHls(tabId: number, url: string, pageTitle?: string, thumb?: st
       tabId,
       foundAt: Date.now(),
       thumb,
+      frameUrl,
       pageUrl: info.pageUrl,
       pageTitle: pageTitle ?? info.pageTitle,
     };
@@ -368,7 +377,13 @@ async function addHls(tabId: number, url: string, pageTitle?: string, thumb?: st
   }
 }
 
-async function addDash(tabId: number, url: string, pageTitle?: string, thumb?: string): Promise<void> {
+async function addDash(
+  tabId: number,
+  url: string,
+  pageTitle?: string,
+  thumb?: string,
+  frameUrl?: string,
+): Promise<void> {
   await restored;
   if (getTabItems(tabId).has(url)) return;
   const inflightKey = `${tabId}:${url}`;
@@ -386,6 +401,7 @@ async function addDash(tabId: number, url: string, pageTitle?: string, thumb?: s
       tabId,
       foundAt: Date.now(),
       thumb,
+      frameUrl,
       pageUrl: info.pageUrl,
       pageTitle: pageTitle ?? info.pageTitle,
       durationSec: mpdDuration(text) ?? undefined,
@@ -408,12 +424,18 @@ chrome.webRequest.onHeadersReceived.addListener(
     const contentType = header('content-type');
     const kind = classifyMedia(details.url, contentType);
     if (!kind) return;
+    // Кто на самом деле просил файл: у плеера в iframe это его собственный
+    // документ, а не страница вокруг. initiator — только origin, но и он
+    // ближе к правде, чем адрес верхней вкладки
+    // documentUrl Chrome отдаёт с версии 63, но в @types/chrome для
+    // onHeadersReceived его до сих пор не описали
+    const frameUrl = (details as { documentUrl?: string }).documentUrl ?? details.initiator ?? undefined;
     if (kind === 'hls') {
-      void addHls(details.tabId, details.url);
+      void addHls(details.tabId, details.url, undefined, undefined, frameUrl);
       return;
     }
     if (kind === 'dash') {
-      void addDash(details.tabId, details.url);
+      void addDash(details.tabId, details.url, undefined, undefined, frameUrl);
       return;
     }
     let size: number | undefined;
@@ -425,7 +447,7 @@ chrome.webRequest.onHeadersReceived.addListener(
       if (cl) size = parseInt(cl, 10);
     }
     // Куски одного файла (?bytes=...) схлопываем в один элемент с полным URL
-    void addDirect(details.tabId, canonicalMediaUrl(details.url), contentType ?? undefined, size);
+    void addDirect(details.tabId, canonicalMediaUrl(details.url), contentType ?? undefined, size, undefined, undefined, frameUrl);
   },
   { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame', 'xmlhttprequest', 'media', 'object', 'other'] },
   ['responseHeaders'],
@@ -741,7 +763,7 @@ function requestThumb(item: MediaItem): void {
     type: 'thumb',
     reqId,
     url: item.url,
-    headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
+    headers: { referer: item.frameUrl ?? item.pageUrl, userAgent: navigator.userAgent },
   });
   if (!res.ok) {
     pendingThumbs.delete(reqId);
@@ -815,7 +837,7 @@ async function startHlsJob(
     outDir: dir.dir,
     streams,
     cut,
-    headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
+    headers: { referer: item.frameUrl ?? item.pageUrl, userAgent: navigator.userAgent },
   });
   return { ok: true, jobId };
 }
@@ -854,7 +876,7 @@ async function startDirectJob(
     outDir: dir.dir,
     streams,
     cut,
-    headers: { referer: item.pageUrl, userAgent: navigator.userAgent },
+    headers: { referer: item.frameUrl ?? item.pageUrl, userAgent: navigator.userAgent },
   });
   return { ok: true, jobId };
 }

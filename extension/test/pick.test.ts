@@ -4,6 +4,7 @@ import {
   backgroundImageUrl,
   bestFromSrcset,
   imageStem,
+  isPostLink,
   meetsPickThreshold,
   previewSiblings,
 } from '../src/lib/pick';
@@ -185,5 +186,45 @@ describe('meetsPickThreshold', () => {
     expect(meetsPickThreshold(99, 400)).toBe(false);
     expect(meetsPickThreshold(400, 99)).toBe(false);
     expect(meetsPickThreshold(24, 24)).toBe(false);
+  });
+});
+
+describe('isPostLink', () => {
+  it('узнаёт посты площадок, которые уже работали', () => {
+    expect(isPostLink('https://x.com/user/status/123')).toBe(true);
+    expect(isPostLink('https://youtube.com/watch?v=abc')).toBe(true);
+    expect(isPostLink('https://youtube.com/shorts/abc')).toBe(true);
+    expect(isPostLink('https://tiktok.com/@user/video/123')).toBe(true);
+    expect(isPostLink('https://instagram.com/reel/CxYz12/')).toBe(true);
+  });
+
+  it('Facebook пишет watch с лишним слэшем', () => {
+    expect(isPostLink('https://facebook.com/watch/?v=123456')).toBe(true);
+  });
+
+  it('Reddit прячет пост за comments', () => {
+    expect(isPostLink('https://reddit.com/r/videos/comments/1a2b3c/slug/')).toBe(true);
+  });
+
+  it('ВКонтакте отделяет id дефисом, а не слэшем', () => {
+    expect(isPostLink('https://vk.com/video-123456_789')).toBe(true);
+    expect(isPostLink('https://vkvideo.ru/clip-1_2')).toBe(true);
+    expect(isPostLink('https://vk.com/wall-99_1')).toBe(true);
+  });
+
+  it('Instagram-пост и Threads — короткие коды после /p/ и /post/', () => {
+    expect(isPostLink('https://instagram.com/p/CxYz12abc/')).toBe(true);
+    expect(isPostLink('https://threads.net/@user/post/C1a2B3c4')).toBe(true);
+  });
+
+  it('каталожная ссылка постом не считается — иначе полезем не туда', () => {
+    expect(isPostLink('https://shop.ru/p/kran')).toBe(false);
+    expect(isPostLink('https://site.ru/about/')).toBe(false);
+    expect(isPostLink('https://site.ru/news/2026/01/zagolovok')).toBe(false);
+  });
+
+  it('мусор вместо адреса не роняет', () => {
+    expect(isPostLink('')).toBe(false);
+    expect(isPostLink('не адрес')).toBe(false);
   });
 });

@@ -4,7 +4,7 @@
 // Стримы через MSE (blob:) в первую часть не попадают — их видит background
 // по сети, а прицел отдаёт такие ролики yt-dlp по адресу поста.
 
-import { backgroundImageUrl, bestFromSrcset, meetsPickThreshold } from './lib/pick';
+import { backgroundImageUrl, bestFromSrcset, isPostLink, meetsPickThreshold } from './lib/pick';
 import { fmtEta, fmtSize, fmtSpeed } from './lib/progress';
 import { typeIconSvg, type FileKind } from './lib/media-icon';
 
@@ -69,7 +69,6 @@ function mediaThumb(el: HTMLElement): string | undefined {
 }
 
 /** Адреса, по которым узнаётся страница одного ролика, а не лента */
-const POST_LINK = /\/(watch\?v=|shorts\/|status\/|reel\/|video\/|videos\/|clip\/|episode\/)/;
 
 /** Карточка поста в ленте: у X это article, у остальных — свои приметы */
 const POST_CARD = 'article, [role="article"], [data-testid="tweet"], [data-testid="cellInnerDiv"]';
@@ -78,7 +77,7 @@ const POST_CARD = 'article, [role="article"], [data-testid="tweet"], [data-testi
 function postLinkIn(node: Element): string | undefined {
   for (const a of node.querySelectorAll<HTMLAnchorElement>('a[href]')) {
     const abs = absUrl(a.href);
-    if (abs && POST_LINK.test(abs)) return abs;
+    if (abs && isPostLink(abs)) return abs;
   }
   return undefined;
 }
@@ -87,7 +86,7 @@ function postLinkIn(node: Element): string | undefined {
  *  ютуба — ему нужен адрес конкретного ролика. */
 function postUrl(v: HTMLElement): string | undefined {
   // Страница сама и есть страница ролика — лучше ссылки не найти
-  if (POST_LINK.test(location.href)) return stripSelfHash(location.href);
+  if (isPostLink(location.href)) return stripSelfHash(location.href);
 
   // Карточка поста целиком: в ленте X от видео до неё полтора десятка узлов,
   // и подъём по одному уровню за раз до ссылки не доходил
@@ -108,7 +107,7 @@ function postUrl(v: HTMLElement): string | undefined {
 
 /** Похоже на ленту: роликов много, и адрес страницы ни одному из них не адрес */
 function looksLikeFeed(): boolean {
-  return document.querySelectorAll('video').length > 1 && !POST_LINK.test(location.href);
+  return document.querySelectorAll('video').length > 1 && !isPostLink(location.href);
 }
 
 /** Хэш в адресе ролика — позиция плеера, качать по нему нечего */
@@ -523,7 +522,7 @@ function imageAt(x: number, y: number): PickTarget | null {
 function imageTarget(el: Element, url: string): PickTarget {
   const href = el.closest('a')?.href;
   const post = href ? absUrl(href) : null;
-  let offerVideo = post != null && POST_LINK.test(post);
+  let offerVideo = post != null && isPostLink(post);
   // В ленте X ссылка на пост висит на каждой картинке, включая фотопосты без
   // единого ролика. Раз карточка поста опознана — спрашиваем её саму, есть ли
   // там видео, и не предлагаем скачать то, чего в посте нет

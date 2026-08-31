@@ -128,3 +128,32 @@ export const MIN_PICK_SIZE = 100;
 export function meetsPickThreshold(width: number, height: number): boolean {
   return width >= MIN_PICK_SIZE && height >= MIN_PICK_SIZE;
 }
+
+/**
+ * Ссылка ведёт на страницу поста. В ленте поток обычно идёт по MSE и своего
+ * адреса не имеет — тогда единственная зацепка для yt-dlp это адрес поста.
+ * Не нашли пост — прицел честно говорит, что не понял, из какого он.
+ *
+ * Приметы у каждой площадки свои, поэтому список длинный. Коды постов требуем
+ * длинными: иначе каталожная ссылка вида /p/kran сойдёт за пост Instagram, и
+ * прицел уведёт yt-dlp на страницу товара.
+ */
+const POST_LINK_PATTERNS = [
+  /\/watch\/?\?v=/, // YouTube и Facebook — у второго лишний слэш перед знаком
+  /\/watch\/\d/, // Netflix и родня
+  /\/(shorts|status|reel|reels|video|videos|clip|episode)\//,
+  /\/(video|clip|wall)-?\d+_\d+/, // ВКонтакте: id через дефис и подчёркивание
+  /\/comments\//, // Reddit
+  /\/(p|post|tv)\/[A-Za-z0-9_-]{5,}/, // Instagram, Threads
+];
+
+export function isPostLink(url: string): boolean {
+  let path = url;
+  try {
+    const u = new URL(url);
+    path = u.pathname + u.search;
+  } catch {
+    // не адрес — судим по строке как есть
+  }
+  return POST_LINK_PATTERNS.some((re) => re.test(path));
+}
