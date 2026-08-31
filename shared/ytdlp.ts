@@ -16,19 +16,45 @@ export const HLS_CONCURRENCY = '8';
 
 // Без --encoding yt-dlp пишет в stdout в кодировке консоли (cp1251) — кириллица
 // в путях превращается в кракозябры, и «показать в папке» не находит файл
+/** Базовые аргументы, которые понимает любая версия */
+const BASE_ARGS = ['--newline', '--encoding', 'utf-8'];
+
+/** Ответ справки на путь: спрашиваем один раз, дальше из памяти */
+const commonArgsCache = new Map<string, string[]>();
+
+/** Знает ли эта сборка такой флаг. Неизвестный флаг — не предупреждение,
+ *  а exit 2: yt-dlp не делает вообще ничего. */
+function supportsFlag(ytdlpPath: string, flag: string): boolean {
+  try {
+    const r = spawnSync(ytdlpPath, ['--help'], { encoding: 'utf8', windowsHide: true, timeout: 20_000 });
+    return (r.stdout ?? '').includes(flag);
+  } catch {
+    return false;
+  }
+}
+
 /**
+ * Аргументы для каждого запуска yt-dlp.
+ *
  * Ютуб гоняет JS-челлендж, и без движка JavaScript свежий yt-dlp не проходит
- * его вовсе: «The page needs to be reloaded» вместо списка качеств. Движок у
- * нас уже есть — тот самый Node, на котором работает и сам хост, поэтому
- * передаём точный путь к нему, а не надеемся на PATH.
+ * его вовсе: «The page needs to be reloaded» вместо списка качеств. Сам он
+ * ищет только deno, поэтому движок надо назвать — а он у нас уже есть, тот
+ * самый Node, на котором работает хост, и передаём мы точный путь к нему.
+ *
+ * Но необязательный флаг в общих аргументах — это заряженное ружьё: стоит
+ * yt-dlp его переименовать, и лягут разом и разведка, и загрузка. Поэтому
+ * сначала спрашиваем справку, и добавляем флаг, только если он там есть.
  */
-export const YTDLP_COMMON_ARGS = [
-  '--newline',
-  '--encoding',
-  'utf-8',
-  '--js-runtimes',
-  `node:${process.execPath}`,
-];
+export function ytdlpCommonArgs(ytdlpPath: string): string[] {
+  const cached = commonArgsCache.get(ytdlpPath);
+  if (cached) return cached;
+  const args = [...BASE_ARGS];
+  if (supportsFlag(ytdlpPath, '--js-runtimes')) {
+    args.push('--js-runtimes', `node:${process.execPath}`);
+  }
+  commonArgsCache.set(ytdlpPath, args);
+  return args;
+}
 
 export function findBin(binDir: string, name: string): string {
   const local = path.join(binDir, `${name}.exe`);
@@ -234,7 +260,7 @@ export function createYtdlpEngine(o: { binDir: string; log?: Log }): YtdlpEngine
   function probe(pageUrl: string, opts: { cookieFile?: string; timeoutMs?: number } = {}): Promise<ProbeResult> {
     const timeoutMs = opts.timeoutMs ?? PROBE_TIMEOUT_MS;
     return new Promise((resolve) => {
-      const args = [...YTDLP_COMMON_ARGS, '--no-playlist', '-J'];
+      const args = [...ytdlpCommonArgs(ytdlpPath), '--no-playlist', '-J'];
       // Ютуб просит войти и на разведке, а не только на загрузке
       if (opts.cookieFile) args.push('--cookies', opts.cookieFile);
       args.push(pageUrl);
@@ -301,7 +327,7 @@ export function createYtdlpEngine(o: { binDir: string; log?: Log }): YtdlpEngine
     }
 
     const streams = opts.streams ?? 'both';
-    const args = [...YTDLP_COMMON_ARGS, '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY];
+    const args = [...ytdlpCommonArgs(ytdlpPath), '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY];
     let presetOutFile = '';
     if (opts.resumePath || opts.filenameStem) {
       // Резюм продолжает тот же файл; новое имя защищаем от перезаписи

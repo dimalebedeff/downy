@@ -11,7 +11,7 @@ import {
   killProcessTree,
   makeYtdlpStdoutHandler,
   uniquePath,
-  YTDLP_COMMON_ARGS,
+  ytdlpCommonArgs,
 } from '../../shared/ytdlp';
 import { cookiesToHeader } from '../../shared/cookies';
 import { parseFfmpegInfo, type ProbedMedia } from '../../shared/ffmpeg-info';
@@ -254,7 +254,7 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelec
   // Дорожку вырезаем после скачивания: в муксованном HLS yt-dlp не умеет
   // отдать только видео/аудио, а качать медленным ffmpeg напрямую — терять скорость
   const dlFile = streams === 'both' ? outFile : `${outFile}.dl.mp4`;
-  const args = [...YTDLP_COMMON_ARGS, '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-o', dlFile];
+  const args = [...ytdlpCommonArgs(ytdlpPath), '--no-playlist', '--concurrent-fragments', HLS_CONCURRENCY, '-o', dlFile];
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
   if (req.headers?.userAgent) args.push('--user-agent', req.headers.userAgent);
   if (req.headers?.referer) args.push('--referer', req.headers.referer);
@@ -640,7 +640,7 @@ function startThumbnail(req: ThumbnailJobRequest): void {
   }
 
   const args = [
-    ...YTDLP_COMMON_ARGS, '--no-playlist', '--skip-download',
+    ...ytdlpCommonArgs(ytdlpPath), '--no-playlist', '--skip-download',
     '--write-thumbnail', '--convert-thumbnails', 'jpg',
     '-o', `thumbnail:${stemPath}.%(ext)s`,
   ];

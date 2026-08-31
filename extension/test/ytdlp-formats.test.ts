@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { qualityOptions } from '../src/lib/ytdlp-formats';
+import { ytdlpCommonArgs } from '../../shared/ytdlp';
 import type { ProbeFormat } from '../../shared/protocol';
 
 const MB = 1024 * 1024;
@@ -54,5 +55,20 @@ describe('qualityOptions', () => {
   it('аудио-форматы и форматы без высоты не создают пунктов', () => {
     expect(qualityOptions([audio(50 * MB), { hasVideo: true, hasAudio: false }])).toEqual([]);
     expect(qualityOptions([])).toEqual([]);
+  });
+});
+
+describe('ytdlpCommonArgs', () => {
+  it('без поддержки флага отдаёт только базовое', () => {
+    // Неизвестный флаг для yt-dlp — это exit 2, то есть разом мёртвые
+    // разведка и загрузка. Не нашли в справке — не передаём
+    const args = ytdlpCommonArgs('C:\нет\такого\yt-dlp.exe');
+    expect(args).toEqual(['--newline', '--encoding', 'utf-8']);
+  });
+
+  it('решение кешируется: справку спрашиваем один раз на путь', () => {
+    const first = ytdlpCommonArgs('C:\нет\такого\yt-dlp.exe');
+    const second = ytdlpCommonArgs('C:\нет\такого\yt-dlp.exe');
+    expect(second).toBe(first);
   });
 });
