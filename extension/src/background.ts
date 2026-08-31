@@ -47,6 +47,9 @@ const tabPageVideos = new Map<number, Map<string, PageVideo>>();
 const PAGE_VIDEOS_MAX = 10;
 /** Убранные крестиком находки — не возвращаются до перезагрузки вкладки */
 const tabRemoved = new Map<number, Set<string>>();
+/** Вкладки с включённым прицелом и счётчик взятого — для плашки на странице.
+ *  Переживает сон воркера вместе с остальным состоянием вкладки */
+const pickCounts = new Map<number, number>();
 const jobs = new Map<string, JobInfo>();
 const inflightHls = new Set<string>();
 
@@ -133,7 +136,16 @@ function enqueueJob(job: JobInfo, req: CoAppRequest): void {
 const restored: Promise<void> = (async () => {
   const data = await chrome.storage.session.get([
     'tabMedia', 'jobs', 'tabVariantUrls', 'tabPageThumb', 'tabPageVideos', 'tabRemoved', 'queueOrder', 'jobRequests',
+    'pickCounts',
   ]);
+  if (data.pickCounts) {
+    // Прицел живёт в контент-скрипте, а тот сон воркера переживает. Забыть,
+    // что он включён, значит ответить на следующий Alt+Shift+D «включаю» —
+    // и человек выходит из режима со второго нажатия
+    for (const [tabId, taken] of Object.entries(data.pickCounts as Record<string, number>)) {
+      pickCounts.set(Number(tabId), taken);
+    }
+  }
   if (data.tabPageThumb) {
     for (const [tabId, thumb] of Object.entries(data.tabPageThumb as Record<string, string>)) {
       tabPageThumb.set(Number(tabId), thumb);
@@ -220,6 +232,7 @@ function persist(): void {
       jobs: Object.fromEntries(jobs),
       queueOrder,
       jobRequests: Object.fromEntries(jobRequests),
+      pickCounts: Object.fromEntries(pickCounts),
     });
   }, 300);
 }
@@ -432,6 +445,18 @@ const pendingMediaProbes = new Map<string, (results: ProbedMedia[]) => void>();
 const probeCache = new Map<string, ProbeState>();
 const pendingProbes = new Map<string, string>(); // reqId -> pageUrl
 
+/** Сколько разведок держим в воздухе разом. Попап на ленте знает до десятка
+ *  видео-постов, и залп из десяти yt-dlp ради списка качеств — это гудящий
+ *  вентилятор там, где человек просто открыл список посмотреть. По очереди
+ *  верхние карточки всё равно получают качества первыми. */
+const PROBE_CONCURRENCY = 2;
+const probeQueue: string[] = [];
+
+/** Неудачную разведку помним недолго: сеть могла моргнуть, а вечное «нет
+ *  качеств» из-за одного сбоя молча режет прицел до 1080p */
+const PROBE_ERROR_TTL_MS = 60_000;
+const probeFailedAt = new Map<string, number>();
+
 /** Разведка форматов идёт секунды; столько прицел готов ждать ради качеств */
 const PROBE_WAIT_MS = 9000;
 
@@ -449,18 +474,34 @@ async function awaitProbe(pageUrl: string): Promise<ProbeState> {
 /** Запускает разведку, если её ещё не было; отвечает текущим состоянием. */
 function ensureProbe(pageUrl: string): ProbeState {
   const cached = probeCache.get(pageUrl);
-  if (cached) return cached;
-  const reqId = crypto.randomUUID();
-  pendingProbes.set(reqId, pageUrl);
+  if (cached) {
+    const failedAt = probeFailedAt.get(pageUrl);
+    if (cached.status !== 'error' || failedAt == null || Date.now() - failedAt < PROBE_ERROR_TTL_MS) return cached;
+    probeCache.delete(pageUrl);
+    probeFailedAt.delete(pageUrl);
+  }
   const pending: ProbeState = { status: 'pending' };
   probeCache.set(pageUrl, pending);
-  const res = sendToCoApp({ type: 'probe', reqId, pageUrl });
-  if (!res.ok) {
-    pendingProbes.delete(reqId);
-    probeCache.delete(pageUrl);
-    return { status: 'error', error: res.error };
+  probeQueue.push(pageUrl);
+  return pumpProbes() ?? pending;
+}
+
+/** Двигает очередь разведки. Возвращает ошибку, если CoApp не отозвался —
+ *  ждать нечего, пусть карточка сразу скажет об этом. */
+function pumpProbes(): ProbeState | undefined {
+  while (pendingProbes.size < PROBE_CONCURRENCY) {
+    const pageUrl = probeQueue.shift();
+    if (!pageUrl) return undefined;
+    const reqId = crypto.randomUUID();
+    pendingProbes.set(reqId, pageUrl);
+    const res = sendToCoApp({ type: 'probe', reqId, pageUrl });
+    if (!res.ok) {
+      pendingProbes.delete(reqId);
+      probeCache.delete(pageUrl);
+      return { status: 'error', error: res.error };
+    }
   }
-  return pending;
+  return undefined;
 }
 // Ожидающие ответа ping (проверка статуса из попапа)
 const pendingPings = new Set<(res: { ok: boolean; info?: PongEvent; error?: string }) => void>();
@@ -504,6 +545,10 @@ function getCoAppPort(): chrome.runtime.Port {
           ? { status: 'ready', title: msg.title, thumbnailUrl: msg.thumbnailUrl, formats: msg.formats ?? [] }
           : { status: 'error', error: msg.error },
       );
+      if (msg.ok) probeFailedAt.delete(url);
+      else probeFailedAt.set(url, Date.now());
+      // Место освободилось — пускаем следующую из очереди
+      pumpProbes();
       return;
     }
     if (msg.type === 'probe_media') {
@@ -574,6 +619,8 @@ function getCoAppPort(): chrome.runtime.Port {
     // Зависшие разведки — тоже на повтор
     for (const url of pendingProbes.values()) probeCache.delete(url);
     pendingProbes.clear();
+    for (const url of probeQueue) probeCache.delete(url);
+    probeQueue.length = 0;
     for (const job of jobs.values()) {
       if (job.state === 'running' || job.state === 'starting') {
         // Запрос сохранился — паузим и поднимем сами: человек кнопку не жал,
@@ -938,9 +985,6 @@ function broadcastUpdateProgress(state: string, message?: string): void {
  */
 const PICKER_MAX_HEIGHT = 1080;
 
-/** Вкладки с включённым прицелом и счётчик взятого — для плашки на странице */
-const pickCounts = new Map<number, number>();
-
 interface PickVariant {
   label: string;
   url?: string;
@@ -973,6 +1017,7 @@ function tellFrames(tabId: number, msg: unknown): void {
 function setPicker(tabId: number, on: boolean, why = ''): void {
   if (on) pickCounts.set(tabId, 0);
   else pickCounts.delete(tabId);
+  persist();
   log('bg', `прицел ${on ? 'включён' : 'выключен'}${why ? ` (${why})` : ''}, вкладка ${tabId}`);
   tellFrames(tabId, { type: 'picker', on });
 }
