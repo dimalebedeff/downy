@@ -370,7 +370,9 @@ function renderMedia(): void {
     } else {
       thumbBox.textContent = item.kind !== 'direct' || item.contentType?.startsWith('video') ? '🎬' : '🎵';
     }
-    const duration = fmtDuration(item.durationSec);
+    // У эфира длительности не существует: то, что пишут в манифесте, — размер
+    // буфера, полминуты. Показать её значило бы обещать короткий ролик
+    const duration = item.live ? 'эфир' : fmtDuration(item.durationSec);
     if (duration) {
       const badge = document.createElement('span');
       badge.className = 'badge';
@@ -394,6 +396,7 @@ function renderMedia(): void {
 
     const metaParts: string[] = [];
     if (item.size) metaParts.push(fmtSize(item.size));
+    if (item.live) metaParts.push('идёт сейчас — конца нет, остановите сами');
     if (metaParts.length) {
       const meta = document.createElement('div');
       meta.className = 'card-meta';
@@ -533,6 +536,17 @@ function actionsRow(group: MediaGroup): HTMLDivElement {
   const item = group.primary;
   const row = document.createElement('div');
   row.className = 'card-actions';
+
+  // Скачать защищённое можно, посмотреть — нет: ключ остаётся у сервиса, а на
+  // диск лёг бы шум под видом фильма. Честнее не давать кнопку вовсе
+  if (item.drm) {
+    const why = document.createElement('div');
+    why.className = 'card-warn';
+    why.textContent = 'Защищено DRM — скачать нельзя';
+    why.title = 'Сегменты зашифрованы, ключ выдаёт только плеер сервиса. Файл скачался бы, но внутри был бы шум.';
+    row.append(why);
+    return row;
+  }
 
   let select: HTMLSelectElement | null = null;
   if (item.kind === 'hls' && item.variants && item.variants.length > 0) {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isLivePlaylist,
   isMasterPlaylist,
+  isProtectedPlaylist,
   looksLikePlaylist,
   parseMasterPlaylist,
   playlistDuration,
@@ -75,5 +77,39 @@ describe('playlistDuration', () => {
 
   it('возвращает 0, если сегментов нет', () => {
     expect(playlistDuration(MASTER)).toBe(0);
+  });
+});
+
+describe('isLivePlaylist', () => {
+  it('запись заканчивается ENDLIST', () => {
+    expect(isLivePlaylist('#EXTM3U\n#EXTINF:4,\na.ts\n#EXT-X-ENDLIST\n')).toBe(false);
+  });
+
+  it('эфир его не ставит — сегменты ещё будут', () => {
+    expect(isLivePlaylist('#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:900\n#EXTINF:4,\na.ts\n')).toBe(true);
+  });
+
+  it('мастер-плейлист про эфир не говорит — не выдумываем', () => {
+    expect(isLivePlaylist('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nlow.m3u8\n')).toBe(false);
+  });
+});
+
+describe('isProtectedPlaylist', () => {
+  it('FairPlay выдаёт себя схемой skd', () => {
+    const text = '#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://key-id"\n#EXTINF:4,\na.ts\n';
+    expect(isProtectedPlaylist(text)).toBe(true);
+  });
+
+  it('SAMPLE-AES — тоже DRM, ключа у нас не будет', () => {
+    expect(isProtectedPlaylist('#EXTM3U\n#EXT-X-SESSION-KEY:METHOD=SAMPLE-AES-CTR,URI="https://lic/k"\n')).toBe(true);
+  });
+
+  it('обычный AES-128 с ключом по https не мешает: yt-dlp его берёт сам', () => {
+    const text = '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="https://cdn.io/key.bin"\n#EXTINF:4,\na.ts\n';
+    expect(isProtectedPlaylist(text)).toBe(false);
+  });
+
+  it('плейлист без ключей ничем не защищён', () => {
+    expect(isProtectedPlaylist('#EXTM3U\n#EXTINF:4,\na.ts\n#EXT-X-ENDLIST\n')).toBe(false);
   });
 });

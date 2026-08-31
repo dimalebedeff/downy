@@ -1,7 +1,14 @@
 import { classifyMedia, isProbablyVideo } from './lib/media-detect';
 import { canonicalMediaUrl, sniffMuted, stripHash } from './lib/media-group';
-import { isMasterPlaylist, looksLikePlaylist, parseMasterPlaylist, playlistDuration } from './lib/m3u8';
-import { looksLikeMpd, mpdDuration } from './lib/mpd';
+import {
+  isLivePlaylist,
+  isMasterPlaylist,
+  isProtectedPlaylist,
+  looksLikePlaylist,
+  parseMasterPlaylist,
+  playlistDuration,
+} from './lib/m3u8';
+import { isLiveMpd, isProtectedMpd, looksLikeMpd, mpdDuration } from './lib/mpd';
 import { buildFilename, buildYtdlpStem } from './lib/filename';
 import { isNewerVersion, REPO } from './lib/update';
 import { applyReorder, isUnfinished, nextToStart, normalizeOrder } from './lib/queue';
@@ -349,8 +356,10 @@ async function addHls(tabId: number, url: string, pageTitle?: string, thumb?: st
       }
       upsertItem({ ...base, variants });
     } else {
-      const durationSec = playlistDuration(text) || undefined;
-      upsertItem({ ...base, durationSec });
+      // У эфира EXTINF считают буфер, а не ролик: полминуты вместо «идёт сейчас»
+      const live = isLivePlaylist(text);
+      const durationSec = live ? undefined : playlistDuration(text) || undefined;
+      upsertItem({ ...base, durationSec, live, drm: isProtectedPlaylist(text) });
     }
   } catch {
     // сеть/CORS — просто не показываем этот плейлист
@@ -380,6 +389,8 @@ async function addDash(tabId: number, url: string, pageTitle?: string, thumb?: s
       pageUrl: info.pageUrl,
       pageTitle: pageTitle ?? info.pageTitle,
       durationSec: mpdDuration(text) ?? undefined,
+      drm: isProtectedMpd(text),
+      live: isLiveMpd(text),
     });
   } catch {
     // сеть/CORS — просто не показываем этот манифест

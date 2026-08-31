@@ -14,6 +14,9 @@ const CHUNK_PARAMS = new Set([
   'range', 'bytes', 'byterange', 'rn', 'rbuf', 'sq', 'sn',
   'seg', 'segment', 'frag', 'fragment', 'start', 'end', 'offset',
   'startbyte', 'endbyte',
+  // Meta переставляет слова местами: у Facebook и Instagram границы куска
+  // зовутся bytestart/byteend, и без них качался один кусок вместо ролика
+  'bytestart', 'byteend',
 ]);
 
 export function canonicalMediaUrl(url: string): string {

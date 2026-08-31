@@ -14,6 +14,17 @@ describe('canonicalMediaUrl', () => {
     expect(canonicalMediaUrl('https://cdn.io/v?itag=22&range=100-200&rn=5')).toBe('https://cdn.io/v?itag=22');
   });
 
+  it('срезает нарезку Meta: она зовёт границы bytestart/byteend', () => {
+    // Facebook и Instagram отдают ролик кусками именно так. Не срежешь —
+    // в загрузку уедет адрес одного куска, и файл выйдет обрезанным
+    expect(canonicalMediaUrl('https://video.xx.fbcdn.net/v/t42.mp4?oh=ab&bytestart=0&byteend=176947')).toBe(
+      'https://video.xx.fbcdn.net/v/t42.mp4?oh=ab',
+    );
+    expect(canonicalMediaUrl('https://scontent.cdninstagram.com/o1/v/t2/f1.mp4?byteend=99&efg=xyz')).toBe(
+      'https://scontent.cdninstagram.com/o1/v/t2/f1.mp4?efg=xyz',
+    );
+  });
+
   it('срезает hash и не трогает остальные параметры', () => {
     expect(canonicalMediaUrl('https://a.io/v.mp4?sig=x&expires=1#t=10')).toBe('https://a.io/v.mp4?sig=x&expires=1');
   });

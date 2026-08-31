@@ -81,3 +81,32 @@ function resolveUrl(uri: string, base: string): string {
     return uri;
   }
 }
+
+/**
+ * Плейлист эфира. У записи в конце стоит #EXT-X-ENDLIST, у трансляции его нет
+ * и не будет: сегменты продолжают приезжать. Считать длительность по EXTINF
+ * там бессмысленно — выйдет длина буфера, полминуты, — а загрузка не кончится
+ * никогда. Мастер-плейлист про эфир не говорит вовсе, и выдумывать не станем.
+ */
+export function isLivePlaylist(text: string): boolean {
+  if (isMasterPlaylist(text)) return false;
+  return !text.includes('#EXT-X-ENDLIST');
+}
+
+/**
+ * Поток под DRM: ключ выдаёт лицензионный сервер, и без него скачанные
+ * сегменты — просто шум. Обычный AES-128 с ключом по http сюда не относится:
+ * его yt-dlp забирает и расшифровывает сам, такие потоки качаются нормально.
+ */
+export function isProtectedPlaylist(text: string): boolean {
+  const re = /#EXT-X-(?:SESSION-)?KEY:([^\r\n]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const attrs = parseAttrs(m[1]);
+    const method = (attrs.METHOD ?? '').toUpperCase();
+    if (method.startsWith('SAMPLE-AES')) return true;
+    // FairPlay раздаёт ключи по своей схеме — обычным запросом не взять
+    if (/^skd:/i.test(attrs.URI ?? '')) return true;
+  }
+  return false;
+}

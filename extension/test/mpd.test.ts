@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeMpd, mpdDuration } from '../src/lib/mpd';
+import { isLiveMpd, isProtectedMpd, looksLikeMpd, mpdDuration } from '../src/lib/mpd';
 
 const MPD = `<?xml version="1.0" encoding="utf-8"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static"
@@ -36,5 +36,27 @@ describe('mpdDuration', () => {
 
   it('live-манифест без длительности — null', () => {
     expect(mpdDuration('<MPD type="dynamic">')).toBeNull();
+  });
+});
+
+describe('isProtectedMpd', () => {
+  it('ContentProtection = контент зашифрован', () => {
+    const xml = '<MPD><Period><AdaptationSet><ContentProtection schemeIdUri="urn:uuid:EDEF8BA9"/></AdaptationSet></Period></MPD>';
+    expect(isProtectedMpd(xml)).toBe(true);
+  });
+
+  it('обычный манифест защиты не объявляет', () => {
+    expect(isProtectedMpd('<MPD><Period><AdaptationSet mimeType="video/mp4"/></Period></MPD>')).toBe(false);
+  });
+});
+
+describe('isLiveMpd', () => {
+  it('эфир объявляет себя динамическим', () => {
+    expect(isLiveMpd('<MPD type="dynamic" minimumUpdatePeriod="PT2S">')).toBe(true);
+  });
+
+  it('запись статична', () => {
+    expect(isLiveMpd('<MPD type="static" mediaPresentationDuration="PT1H">')).toBe(false);
+    expect(isLiveMpd('<MPD mediaPresentationDuration="PT1H">')).toBe(false);
   });
 });

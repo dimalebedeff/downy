@@ -315,6 +315,16 @@ ul { list-style: none; margin: 0; padding: 0; }
 
 .card-actions { margin-top: auto; display: flex; align-items: center; gap: 6px; }
 
+/* Объяснение вместо кнопки: качать нечего, и надо сказать почему */
+.card-warn {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- Кнопки ---------- */
 
 button { font: inherit; cursor: pointer; }

@@ -26,6 +26,11 @@ export interface MediaItem {
   durationSec?: number;
   /** Превью: poster тега video или кадр (data URL) */
   thumb?: string;
+  /** Под DRM: сегменты зашифрованы ключом лицензионного сервера. Скачать
+   *  можно, смотреть нечего — обещать такую загрузку нечестно */
+  drm?: boolean;
+  /** Эфир: конца у потока нет, а длительность в манифесте — размер буфера */
+  live?: boolean;
 }
 
 export interface JobInfo {
