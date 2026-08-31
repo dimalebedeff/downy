@@ -632,6 +632,9 @@ function ensureProbe(pageUrl: string): ProbeState {
   return pumpProbes() ?? pending;
 }
 
+/** Страницы, чью разведку уже пробовали с куками: второй раз не поможет */
+const probedWithCookies = new Set<string>();
+
 /** Двигает очередь разведки. Возвращает ошибку, если CoApp не отозвался —
  *  ждать нечего, пусть карточка сразу скажет об этом. */
 function pumpProbes(): ProbeState | undefined {
@@ -640,6 +643,13 @@ function pumpProbes(): ProbeState | undefined {
     if (!pageUrl) return undefined;
     const reqId = crypto.randomUUID();
     pendingProbes.set(reqId, pageUrl);
+    // Сайт, который уже отказал по входу, не отдаст и список качеств:
+    // идём к нему сразу с куками, если они разрешены
+    const host = hostOf(pageUrl);
+    if (cookieSetting && host && cookieHosts.has(host)) {
+      void sendProbeWithCookies(reqId, pageUrl);
+      continue;
+    }
     const res = sendToCoApp({ type: 'probe', reqId, pageUrl });
     if (!res.ok) {
       pendingProbes.delete(reqId);
@@ -648,6 +658,29 @@ function pumpProbes(): ProbeState | undefined {
     }
   }
   return undefined;
+}
+
+async function sendProbeWithCookies(reqId: string, pageUrl: string): Promise<void> {
+  probedWithCookies.add(pageUrl);
+  const cookies = await collectCookies({ type: 'download_ytdlp', jobId: reqId, pageUrl });
+  const res = sendToCoApp(cookies ? { type: 'probe', reqId, pageUrl, cookies } : { type: 'probe', reqId, pageUrl });
+  if (!res.ok) {
+    pendingProbes.delete(reqId);
+    probeCache.delete(pageUrl);
+  }
+}
+
+/** Разведку отказали по входу — повторяем её с куками, как и загрузку */
+function retryProbeWithCookies(pageUrl: string, error?: string): boolean {
+  if (!cookieSetting || probedWithCookies.has(pageUrl)) return false;
+  if (!looksLikeAuthFailure(error)) return false;
+  const host = hostOf(pageUrl);
+  if (!host) return false;
+  cookieHosts.add(host);
+  log('bg', `разведка отказала по входу — повтор с куками ${host}`);
+  probeQueue.push(pageUrl);
+  pumpProbes();
+  return true;
 }
 // Ожидающие ответа ping (проверка статуса из попапа)
 const pendingPings = new Set<(res: { ok: boolean; info?: PongEvent; error?: string }) => void>();
@@ -685,11 +718,23 @@ function getCoAppPort(): chrome.runtime.Port {
       const url = pendingProbes.get(msg.reqId);
       pendingProbes.delete(msg.reqId);
       if (!url) return;
+      // Не пустили по входу — сходим ещё раз с куками, если они разрешены
+      if (!msg.ok && retryProbeWithCookies(url, msg.error)) return;
       probeCache.set(
         url,
         msg.ok
           ? { status: 'ready', title: msg.title, thumbnailUrl: msg.thumbnailUrl, formats: msg.formats ?? [] }
-          : { status: 'error', error: msg.error },
+          : {
+              status: 'error',
+              error: msg.error,
+              // «Качеств нет» тут враньё: они есть, нас не пустили
+              hint:
+                authFailureHint({
+                  message: msg.error,
+                  cookiesOn: cookieSetting,
+                  cookiesTried: probedWithCookies.has(url),
+                }) ?? undefined,
+            },
       );
       if (msg.ok) probeFailedAt.delete(url);
       else probeFailedAt.set(url, Date.now());
@@ -1265,7 +1310,7 @@ async function resolveRealFile(
 async function handlePick(
   tabId: number,
   msg: PickMessage,
-): Promise<{ ok: boolean; error?: string; variants?: PickVariant[] }> {
+): Promise<{ ok: boolean; error?: string; variants?: PickVariant[]; probeHint?: string }> {
   const streams = msg.streams ?? 'both';
   const picked = msg.chosen === true || msg.variantUrl != null || msg.streams != null;
 
@@ -1362,8 +1407,11 @@ async function handlePick(
     const variants = pickVariants(undefined, pageUrl);
     if (variants.length) return { ok: true, variants };
     if (msg.wantVariants) {
-      log('page', 'выбирать не из чего — качества не нашлись');
-      return { ok: true, variants: [] };
+      // Разведку могли не пустить — тогда «качеств нет» враньё, они есть
+      const probed = probeCache.get(pageUrl);
+      const hint = probed?.status === 'error' ? probed.hint : undefined;
+      log('page', hint ? `разведку не пустили: ${hint}` : 'выбирать не из чего — качества не нашлись');
+      return { ok: true, variants: [], probeHint: hint };
     }
   }
   log(

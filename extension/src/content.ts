@@ -904,10 +904,12 @@ async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
   // Просили качества, а выбора нет — говорим об этом на месте. Загрузку эта
   // зона не запускает никогда: качает только сам пункт или конкретное качество
   if (opts.wantVariants) {
+    // Сайт мог не пустить разведку — тогда качества есть, просто не для нас
+    const why = res?.probeHint as string | undefined;
     openMenu(lastMenuAt.x, lastMenuAt.y, [
-      { label: 'Другого качества нет', run: () => undefined, note: true },
+      { label: why ?? 'Другого качества нет', run: () => undefined, note: true },
     ]);
-    window.setTimeout(closeMenu, 1600);
+    window.setTimeout(closeMenu, why ? 4200 : 1600);
     return;
   }
   // Галку ставим по факту загрузки, а не по успеху запроса: ответ «вариантов

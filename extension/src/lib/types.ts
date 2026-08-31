@@ -7,7 +7,12 @@ import type { ProbeFormat } from '../../../shared/protocol';
 export type ProbeState =
   | { status: 'pending' }
   | { status: 'ready'; title?: string; thumbnailUrl?: string; formats: ProbeFormat[] }
-  | { status: 'error'; error?: string };
+  | {
+      status: 'error';
+      error?: string;
+      /** Человеческая причина: «сайт просит войти» вместо «качеств нет» */
+      hint?: string;
+    };
 
 export interface MediaItem {
   /** Ключ — сам URL */

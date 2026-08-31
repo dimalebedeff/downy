@@ -207,7 +207,7 @@ export interface YtdlpEngine {
   ffmpegPath: string;
   ytdlpPath: string;
   ytdlpWorks(): boolean;
-  probe(pageUrl: string, timeoutMs?: number): Promise<ProbeResult>;
+  probe(pageUrl: string, opts?: { cookieFile?: string; timeoutMs?: number }): Promise<ProbeResult>;
   download(opts: YtdlpDownloadOptions, events: YtdlpDownloadEvents): YtdlpDownloadHandle;
 }
 
@@ -219,9 +219,13 @@ export function createYtdlpEngine(o: { binDir: string; log?: Log }): YtdlpEngine
 
   let ytdlpOkCache: boolean | null = null;
 
-  function probe(pageUrl: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<ProbeResult> {
+  function probe(pageUrl: string, opts: { cookieFile?: string; timeoutMs?: number } = {}): Promise<ProbeResult> {
+    const timeoutMs = opts.timeoutMs ?? PROBE_TIMEOUT_MS;
     return new Promise((resolve) => {
-      const args = [...YTDLP_COMMON_ARGS, '--no-playlist', '-J', pageUrl];
+      const args = [...YTDLP_COMMON_ARGS, '--no-playlist', '-J'];
+      // Ютуб просит войти и на разведке, а не только на загрузке
+      if (opts.cookieFile) args.push('--cookies', opts.cookieFile);
+      args.push(pageUrl);
       log('probe start', pageUrl);
       const child = spawn(ytdlpPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 

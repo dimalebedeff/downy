@@ -617,7 +617,10 @@ function startYtdlp(req: YtdlpJobRequest): void {
 // ---------- Разведка форматов (yt-dlp -J) ----------
 
 function probe(req: ProbeRequest): void {
-  void engine.probe(req.pageUrl).then((r) => {
+  // Файл кук живёт под своим ключом: разведка идёт мимо очереди джобов
+  const cookieFile = writeCookieFile(`probe-${req.reqId}`, req.cookies);
+  void engine.probe(req.pageUrl, { cookieFile }).then((r) => {
+    dropCookieFile(`probe-${req.reqId}`);
     sendMessage({ type: 'probe', reqId: req.reqId, ...r });
   });
 }

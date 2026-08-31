@@ -110,6 +110,8 @@ export interface ProbeRequest {
   type: 'probe';
   reqId: string;
   pageUrl: string;
+  /** Куки в формате Netscape — сайт может не отдать даже список качеств */
+  cookies?: string;
 }
 
 /** Один формат из разведки — только то, что нужно для выбора качества */

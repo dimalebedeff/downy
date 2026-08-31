@@ -546,6 +546,17 @@ function pageVideoCard(pv: PageVideo): HTMLLIElement {
 
   row.append(btn, wrapSelect(select, probing), kebab);
   body.append(row);
+  // Разведку не пустили — молчать нельзя: «Лучшее» в списке выглядит так,
+  // будто всё в порядке, а качества сайт просто не отдал
+  const probeHint = pv.probe?.status === 'error' ? pv.probe.hint : undefined;
+  if (probeHint) {
+    const why = document.createElement('div');
+    why.className = 'card-warn';
+    why.textContent = probeHint;
+    why.title = pv.probe?.status === 'error' ? pv.probe.error ?? '' : '';
+    if (!cookieBox?.checked) why.append(' ', cookieFixBtn());
+    body.append(why);
+  }
 
   li.append(thumbBox, body, removeBtn([pv.url]));
   return li;
