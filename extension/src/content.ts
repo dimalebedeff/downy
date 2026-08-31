@@ -4,7 +4,7 @@
 // Стримы через MSE (blob:) в первую часть не попадают — их видит background
 // по сети, а прицел отдаёт такие ролики yt-dlp по адресу поста.
 
-import { bestFromSrcset } from './lib/pick';
+import { backgroundImageUrl, bestFromSrcset } from './lib/pick';
 import { fmtEta, fmtSize, fmtSpeed } from './lib/progress';
 import { typeIconSvg, type FileKind } from './lib/media-icon';
 
@@ -444,13 +444,8 @@ function bestImageUrl(img: HTMLImageElement): string | undefined {
 
 /** Картинка, нарисованная фоном: никакого <img> в DOM нет */
 function backgroundUrl(el: Element): string | undefined {
-  const bg = getComputedStyle(el).backgroundImage;
-  if (!bg || bg === 'none') return undefined;
-  const m = /url\((['"]?)(.*?)\1\)/.exec(bg);
-  const raw = m?.[2];
-  // data: и градиенты качать нечего
-  if (!raw || raw.startsWith('data:')) return undefined;
-  return absUrl(raw) ?? undefined;
+  const raw = backgroundImageUrl(getComputedStyle(el));
+  return raw ? (absUrl(raw) ?? undefined) : undefined;
 }
 
 function videoTarget(v: HTMLVideoElement): PickTarget {
@@ -497,8 +492,12 @@ function videoAt(x: number, y: number): PickTarget | null {
   return null;
 }
 
+/** Настоящий <img> ищем по всей цепочке первым проходом, фон — вторым. Сайты
+ *  кладут поверх картинки прозрачный слой-заглушку с фоновым узором, и один
+ *  общий проход отдавал эту заглушку: она ближе к курсору, чем сама картинка. */
 function imageAt(x: number, y: number): PickTarget | null {
-  for (const node of chainAt(x, y)) {
+  const chain = chainAt(x, y);
+  for (const node of chain) {
     if (node instanceof HTMLImageElement && bigEnough(node)) {
       const url = bestImageUrl(node);
       if (url) return imageTarget(node, url);
@@ -508,10 +507,11 @@ function imageAt(x: number, y: number): PickTarget | null {
       const url = bestImageUrl(inner);
       if (url) return imageTarget(inner, url);
     }
-    if (bigEnough(node)) {
-      const url = backgroundUrl(node);
-      if (url) return imageTarget(node, url);
-    }
+  }
+  for (const node of chain) {
+    if (!bigEnough(node)) continue;
+    const url = backgroundUrl(node);
+    if (url) return imageTarget(node, url);
   }
   return null;
 }

@@ -98,3 +98,21 @@ export function previewSiblings(url: string): string[] {
     return sibling.toString();
   });
 }
+
+/**
+ * Адрес картинки, нарисованной фоном. Повторяющийся фон пропускаем: плитка —
+ * это узор, рамка, шум, заглушка ленивой картинки, а не то, что человек метил
+ * скачать. Яндекс.Еда кладёт поверх каждого баннера прозрачный слой с таким
+ * паттерном, и прицел уносил один и тот же svg вместо самих баннеров.
+ */
+export function backgroundImageUrl(style: { backgroundImage: string; backgroundRepeat: string }): string | null {
+  const bg = style.backgroundImage;
+  if (!bg || bg === 'none') return null;
+  const repeats = (style.backgroundRepeat ?? '').split(/\s+/).filter(Boolean);
+  if (repeats.some((axis) => axis !== 'no-repeat')) return null;
+  const m = /url\((['"]?)(.*?)\1\)/.exec(bg);
+  const raw = m?.[2];
+  // data: и градиенты качать нечего
+  if (!raw || raw.startsWith('data:')) return null;
+  return raw;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assetIds, bestFromSrcset, imageStem, previewSiblings } from '../src/lib/pick';
+import { assetIds, backgroundImageUrl, bestFromSrcset, imageStem, previewSiblings } from '../src/lib/pick';
 
 describe('bestFromSrcset', () => {
   it('берёт самую большую ширину, а не последнюю запись', () => {
@@ -138,5 +138,32 @@ describe('previewSiblings', () => {
 
   it('битый адрес не роняет разбор', () => {
     expect(previewSiblings('не адрес')).toEqual([]);
+  });
+});
+
+describe('backgroundImageUrl', () => {
+  it('берёт адрес из обычного фона', () => {
+    expect(backgroundImageUrl({ backgroundImage: 'url("/pic.jpg")', backgroundRepeat: 'no-repeat' })).toBe('/pic.jpg');
+  });
+
+  it('повторяющийся фон — плитка-декор, а не добыча', () => {
+    const tile = { backgroundImage: 'url("/pattern.svg")', backgroundRepeat: 'repeat' };
+    expect(backgroundImageUrl(tile)).toBeNull();
+  });
+
+  it('повтор по одной оси — тоже плитка', () => {
+    expect(backgroundImageUrl({ backgroundImage: 'url("/p.svg")', backgroundRepeat: 'repeat no-repeat' })).toBeNull();
+    expect(backgroundImageUrl({ backgroundImage: 'url("/p.svg")', backgroundRepeat: 'no-repeat round' })).toBeNull();
+  });
+
+  it('градиенты и data: качать нечего', () => {
+    expect(backgroundImageUrl({ backgroundImage: 'linear-gradient(red, blue)', backgroundRepeat: 'no-repeat' })).toBeNull();
+    expect(backgroundImageUrl({ backgroundImage: 'url("data:image/png;base64,AAA")', backgroundRepeat: 'no-repeat' })).toBeNull();
+    expect(backgroundImageUrl({ backgroundImage: 'none', backgroundRepeat: 'repeat' })).toBeNull();
+  });
+
+  it('кавычки вокруг адреса необязательны', () => {
+    expect(backgroundImageUrl({ backgroundImage: "url('a.png')", backgroundRepeat: 'no-repeat' })).toBe('a.png');
+    expect(backgroundImageUrl({ backgroundImage: 'url(b.png)', backgroundRepeat: 'no-repeat' })).toBe('b.png');
   });
 });
