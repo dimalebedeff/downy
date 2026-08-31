@@ -934,6 +934,14 @@ function queueRow(job: JobInfo): HTMLLIElement {
   const state = document.createElement('span');
   state.className = 'job-text';
   row.append(typeIcon(job), title, state);
+  if (job.usedCookies) {
+    // Видно, где сессия уехала: риск принят не вслепую
+    const key = document.createElement('span');
+    key.className = 'job-key';
+    key.textContent = '🔑';
+    key.title = 'На сайт ушли ваши куки — без них он отказался отдавать файл';
+    row.append(key);
+  }
 
   if (job.state === 'queued') {
     state.classList.add('queued');
@@ -1167,6 +1175,27 @@ async function init(): Promise<void> {
   askDirBox.checked = askDirEveryTime as boolean;
   askDirBox.addEventListener('change', () => {
     void chrome.storage.local.set({ askDirEveryTime: askDirBox.checked });
+  });
+
+  // Право на куки спрашиваем ровно в момент щелчка: пока тумблер выключен,
+  // расширение и не может их прочитать — не «не читает», а не имеет права
+  const cookieBox = $<HTMLInputElement>('#send-cookies');
+  const { sendCookies } = await chrome.storage.local.get({ sendCookies: false });
+  const granted = await chrome.permissions.contains({ permissions: ['cookies'] });
+  cookieBox.checked = Boolean(sendCookies) && granted;
+  if (sendCookies && !granted) void chrome.storage.local.set({ sendCookies: false });
+  cookieBox.addEventListener('change', () => {
+    void (async () => {
+      if (!cookieBox.checked) {
+        void chrome.storage.local.set({ sendCookies: false });
+        // Право забираем обратно: выключено должно значить «доступа нет»
+        await chrome.permissions.remove({ permissions: ['cookies'] }).catch(() => false);
+        return;
+      }
+      const ok = await chrome.permissions.request({ permissions: ['cookies'] }).catch(() => false);
+      cookieBox.checked = ok;
+      void chrome.storage.local.set({ sendCookies: ok });
+    })();
   });
 
   let defaultOutDir = '';

@@ -33,6 +33,12 @@ export interface HlsJobRequest {
     referer?: string;
     userAgent?: string;
   };
+  /**
+   * Куки в формате Netscape — содержимое файла, а не путь. Хост пишет его во
+   * временный файл на время загрузки и стирает сразу после: файл равен входу
+   * на сайт, лежать ему на диске незачем.
+   */
+  cookies?: string;
 }
 
 export interface DirectJobRequest {
@@ -54,6 +60,12 @@ export interface DirectJobRequest {
     referer?: string;
     userAgent?: string;
   };
+  /**
+   * Куки в формате Netscape — содержимое файла, а не путь. Хост пишет его во
+   * временный файл на время загрузки и стирает сразу после: файл равен входу
+   * на сайт, лежать ему на диске незачем.
+   */
+  cookies?: string;
 }
 
 export interface YtdlpJobRequest {
@@ -75,6 +87,12 @@ export interface YtdlpJobRequest {
   resumePath?: string;
   /** Скачать только отрезок: yt-dlp --download-sections */
   cut?: CutRange;
+  /**
+   * Куки в формате Netscape — содержимое файла, а не путь. Хост пишет его во
+   * временный файл на время загрузки и стирает сразу после: файл равен входу
+   * на сайт, лежать ему на диске незачем.
+   */
+  cookies?: string;
 }
 
 /** Скачать только обложку страницы (yt-dlp --write-thumbnail, конверт в jpg) */

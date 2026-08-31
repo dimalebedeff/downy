@@ -13,6 +13,7 @@ import {
   uniquePath,
   YTDLP_COMMON_ARGS,
 } from '../../shared/ytdlp';
+import { cookiesToHeader } from '../../shared/cookies';
 import { parseFfmpegInfo, type ProbedMedia } from '../../shared/ffmpeg-info';
 import { readMessages, sendMessage } from './nm';
 import type {
@@ -97,6 +98,61 @@ function resolveOutDir(requested?: string): string {
   return dir;
 }
 
+// ---------- Куки: живут ровно столько, сколько идёт загрузка ----------
+
+/** Файл с куками равен входу на сайт — на диске ему делать нечего дольше
+ *  необходимого. Кладём во временную папку, стираем при любом исходе. */
+const COOKIE_PREFIX = 'downy-cookies-';
+const cookieFiles = new Map<string, string>();
+
+function writeCookieFile(jobId: string, cookies?: string): string | undefined {
+  if (!cookies) return undefined;
+  const file = path.join(os.tmpdir(), `${COOKIE_PREFIX}${jobId}.txt`);
+  try {
+    // mode 0600: на Windows это не ACL, но и лишним не будет на других системах
+    fs.writeFileSync(file, cookies, { mode: 0o600 });
+    cookieFiles.set(jobId, file);
+    log('cookies written for', jobId);
+    return file;
+  } catch (e) {
+    log('cookies write failed:', e instanceof Error ? e.message : String(e));
+    return undefined;
+  }
+}
+
+/** Джоб закончился: убираем из карты и стираем его файл кук. Всегда вместе —
+ *  чтобы забытая ветка не оставила сессию лежать на диске */
+function forgetJob(jobId: string): void {
+  jobs.delete(jobId);
+  dropCookieFile(jobId);
+}
+
+function dropCookieFile(jobId: string): void {
+  const file = cookieFiles.get(jobId);
+  if (!file) return;
+  cookieFiles.delete(jobId);
+  // Синхронно: следом может прийти выход хоста, и файл переживёт нас
+  try {
+    fs.rmSync(file, { force: true });
+  } catch {
+    // не удалось — подметём при следующем старте
+  }
+}
+
+/** Хвосты от прошлой жизни: хост могли убить, не дав стереть свой файл */
+function sweepCookieFiles(): void {
+  try {
+    const dir = os.tmpdir();
+    for (const f of fs.readdirSync(dir)) {
+      if (f.startsWith(COOKIE_PREFIX)) fs.rmSync(path.join(dir, f), { force: true });
+    }
+  } catch {
+    // временную папку могли не дать прочитать — не повод не работать
+  }
+}
+
+sweepCookieFiles();
+
 interface RunningJob {
   canceled: boolean;
   /** Пауза: процесс убиваем, но недокачанное оставляем для резюма */
@@ -137,7 +193,7 @@ function jobDone(
   errTail: string,
   pausedKeepsFile = true,
 ): void {
-  jobs.delete(jobId);
+  forgetJob(jobId);
   if (flags.paused) {
     // outFile в событии = «есть что докачивать»; без него резюм начнёт сначала
     if (pausedKeepsFile) {
@@ -202,6 +258,8 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelec
   if (fs.existsSync(path.join(binDir, 'ffmpeg.exe'))) args.push('--ffmpeg-location', binDir);
   if (req.headers?.userAgent) args.push('--user-agent', req.headers.userAgent);
   if (req.headers?.referer) args.push('--referer', req.headers.referer);
+  const cookieFile = writeCookieFile(req.jobId, req.cookies);
+  if (cookieFile) args.push('--cookies', cookieFile);
   args.push(req.url);
 
   log('yt-dlp hls start', req.jobId, req.url, '->', outFile, 'streams:', streams);
@@ -222,7 +280,9 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelec
     if (settled) return;
     settled = true;
     log('yt-dlp hls fallback to ffmpeg', req.jobId, reason.slice(-300));
-    jobs.delete(req.jobId);
+    forgetJob(req.jobId);
+    // ffmpeg куки не получает: заголовки ему идут строкой командной строки
+    dropCookieFile(req.jobId);
     cleanupPartials(dlFile);
     startFfmpegCopy(req, outFile, streams);
   };
@@ -236,11 +296,12 @@ function startHlsYtdlp(req: HlsJobRequest, outFile: string, streams: StreamSelec
     settled = true;
     log('yt-dlp hls exit', req.jobId, code, 'canceled:', job.canceled, 'paused:', job.paused);
     if (job.paused) {
-      // Хвосты .part остаются на диске — по ним yt-dlp продолжит
-      jobs.delete(req.jobId);
+      // Хвосты .part остаются на диске — по ним yt-dlp продолжит. А вот куки
+      // не ждут: пауза может стоять часами, сессию перезапросим при ▶
+      forgetJob(req.jobId);
       emit({ type: 'job', jobId: req.jobId, state: 'paused', progress: null, outFile });
     } else if (job.canceled) {
-      jobs.delete(req.jobId);
+      forgetJob(req.jobId);
       cleanupPartials(dlFile);
       emit({ type: 'job', jobId: req.jobId, state: 'canceled', progress: null });
     } else if (code === 0) {
@@ -257,7 +318,7 @@ function stripTracks(jobId: string, srcFile: string, outFile: string, streams: '
   // Отмена могла прийти в зазор между выходом yt-dlp и этим вызовом —
   // тогда она осела в уже завершившемся джобе
   if (jobs.get(jobId)?.canceled) {
-    jobs.delete(jobId);
+    forgetJob(jobId);
     try {
       fs.rmSync(srcFile, { force: true });
     } catch {
@@ -382,7 +443,7 @@ function startFfmpegCopy(req: FfmpegCopySource, outFile: string, streams: Stream
   child.on('error', (e) => {
     if (settled) return;
     settled = true;
-    jobs.delete(req.jobId);
+    forgetJob(req.jobId);
     log('ffmpeg spawn error', e.message);
     emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: `Не удалось запустить ffmpeg: ${e.message}` });
   });
@@ -434,6 +495,9 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
   const headers: Record<string, string> = {};
   if (req.headers?.referer) headers.Referer = req.headers.referer;
   if (req.headers?.userAgent) headers['User-Agent'] = req.headers.userAgent;
+  // Здесь заголовки — объект, а не командная строка: подделать лишний нельзя
+  const cookieHeader = cookiesToHeader(req.cookies);
+  if (cookieHeader) headers.Cookie = cookieHeader;
   if (startBytes > 0) headers.Range = `bytes=${startBytes}-`;
 
   let out: fs.WriteStream | null = null;
@@ -442,7 +506,7 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
     const resp = await fetch(req.url, { headers, signal: ac.signal, redirect: 'follow' });
     if (resp.status === 416 && startBytes > 0) {
       // Диапазон за концом файла — всё уже скачано до паузы
-      jobs.delete(req.jobId);
+      forgetJob(req.jobId);
       emit({ type: 'job', jobId: req.jobId, state: 'done', progress: 1, bytes: startBytes, outFile });
       return;
     }
@@ -481,11 +545,11 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
       }
     }
     await new Promise<void>((resolve, reject) => out!.end((err?: Error | null) => (err ? reject(err) : resolve())));
-    jobs.delete(req.jobId);
+    forgetJob(req.jobId);
     log('direct done', req.jobId, bytes, 'bytes');
     emit({ type: 'job', jobId: req.jobId, state: 'done', progress: 1, bytes, totalBytes, outFile });
   } catch (e) {
-    jobs.delete(req.jobId);
+    forgetJob(req.jobId);
     if (out) out.destroy();
     if (job.paused) {
       // Недокачанное оставляем — по нему продолжим через Range
@@ -516,6 +580,7 @@ function startYtdlp(req: YtdlpJobRequest): void {
       maxHeight: req.maxHeight,
       resumePath: req.resumePath,
       cut: req.cut,
+      cookieFile: writeCookieFile(req.jobId, req.cookies),
     },
     {
       onProgress: ytdlpProgressToEmit(req.jobId),
@@ -524,7 +589,7 @@ function startYtdlp(req: YtdlpJobRequest): void {
         if (running) running.outFile = f;
       },
       onFinish: (r) => {
-        jobs.delete(req.jobId);
+        forgetJob(req.jobId);
         if (r.state === 'done') {
           emit({ type: 'job', jobId: req.jobId, state: 'done', progress: 1, outFile: r.outFile });
         } else if (r.state === 'paused') {
@@ -590,7 +655,7 @@ function startThumbnail(req: ThumbnailJobRequest): void {
     errTail = (errTail + d.toString()).slice(-2000);
   });
   child.on('error', (e) => {
-    jobs.delete(req.jobId);
+    forgetJob(req.jobId);
     emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: `Не удалось запустить yt-dlp: ${e.message}` });
   });
   child.on('close', (code) => {
@@ -600,7 +665,7 @@ function startThumbnail(req: ThumbnailJobRequest): void {
       fs.rm(`${stemPath}.${ext}`, { force: true }, () => {});
     }
     if (!job.canceled && code === 0 && !fs.existsSync(outFile)) {
-      jobs.delete(req.jobId);
+      forgetJob(req.jobId);
       emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: 'У страницы не нашлось обложки' });
       return;
     }

@@ -17,6 +17,8 @@ import { withCutSuffix } from './lib/cut';
 import { qualityOptions } from './lib/ytdlp-formats';
 import { assetIds, imageStem, previewSiblings } from './lib/pick';
 import { pickBestMedia } from './lib/media-probe';
+import { looksLikeAuthFailure } from './lib/cookies';
+import { toNetscapeCookieFile, type BrowserCookie } from '../../shared/cookies';
 import type { ProbedMedia } from '../../shared/ffmpeg-info';
 import type { JobInfo, MediaItem, ProbeState } from './lib/types';
 import type {
@@ -105,12 +107,7 @@ function pump(): void {
   if (job.pausedBy === 'dropped') job.autoResumes = (job.autoResumes ?? 0) + 1;
   job.state = 'starting';
   job.pausedBy = undefined;
-  const res = sendToCoApp(req);
-  if (!res.ok) {
-    // CoApp лежит — остальную очередь не мучаем, юзер увидит ошибку на первой
-    job.state = 'error';
-    job.message = res.error;
-  }
+  dispatchJob(job, req);
   persist();
   broadcastJobs();
 }
@@ -119,17 +116,133 @@ function pump(): void {
 const NO_QUEUE_MAX_BYTES = 250 * 1024 * 1024;
 
 /** Ставит загрузку в очередь; noQueue-мелочь стартует сразу и параллельно */
+// ---------- Куки: уезжают только туда, где без них отказали ----------
+
+/** Настройка читается один раз и держится в памяти: пока она выключена, путь
+ *  загрузки обязан остаться ровно таким, каким был до всей этой затеи —
+ *  ни лишнего await, ни обращения к кукам, ни единого нового заголовка. */
+let cookieSetting = false;
+
+/** Сайты, которым уже пришлось отдать сессию. Первый раз узнаём по отказу,
+ *  дальше идём с куками сразу. Выключили тумблер — забыли всех. */
+const cookieHosts = new Set<string>();
+
+void chrome.storage.local.get({ sendCookies: false }).then((v) => {
+  cookieSetting = Boolean(v.sendCookies);
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.sendCookies) return;
+  cookieSetting = Boolean(changes.sendCookies.newValue);
+  // Передумали — стираем и память о сайтах: включат снова, начнём с чистого
+  if (!cookieSetting) cookieHosts.clear();
+  log('bg', `куки для загрузок: ${cookieSetting ? 'включены' : 'выключены'}`);
+});
+
+function hostOf(url?: string): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Адреса, чьи куки поедут с этим заданием: страница и сам файл. Берём ровно
+ *  те, что браузер отправил бы туда сам, — чужим доменам сессия не достанется. */
+type CookieCapableRequest = HlsJobRequest | DirectJobRequest | YtdlpJobRequest;
+
+function acceptsCookies(req: CoAppRequest): req is CookieCapableRequest {
+  return req.type === 'download_hls' || req.type === 'download_direct' || req.type === 'download_ytdlp';
+}
+
+function cookieUrlsFor(req: CookieCapableRequest): string[] {
+  const urls: string[] = [];
+  if (req.type === 'download_ytdlp') urls.push(req.pageUrl);
+  else {
+    urls.push(req.url);
+    if (req.headers?.referer) urls.push(req.headers.referer);
+  }
+  return urls;
+}
+
+/** Этому сайту уже приходилось отдавать сессию — не заставляем ждать отказа */
+function cookiesKnownNeeded(req: CoAppRequest): boolean {
+  if (!acceptsCookies(req)) return false;
+  return cookieUrlsFor(req).some((u) => {
+    const h = hostOf(u);
+    return h != null && cookieHosts.has(h);
+  });
+}
+
+async function collectCookies(req: CookieCapableRequest): Promise<string | undefined> {
+  if (!(await chrome.permissions.contains({ permissions: ['cookies'] }))) return undefined;
+  const all: BrowserCookie[] = [];
+  for (const url of cookieUrlsFor(req)) {
+    try {
+      all.push(...((await chrome.cookies.getAll({ url })) as unknown as BrowserCookie[]));
+    } catch {
+      // сайт мог быть нам закрыт — обойдёмся без его кук
+    }
+  }
+  return toNetscapeCookieFile(all) ?? undefined;
+}
+
+/** Отправка задания хосту. Куки прикладываются, только если тумблер включён
+ *  и этот сайт уже показал, что без них не отдаёт. Выключено — синхронный
+ *  путь, тот же самый, что был всегда. */
+function dispatchJob(job: JobInfo, req: CoAppRequest): void {
+  const fail = (error?: string): void => {
+    job.state = 'error';
+    job.message = error;
+    persist();
+    broadcastJobs();
+  };
+  if (!cookieSetting || !cookiesKnownNeeded(req)) {
+    const res = sendToCoApp(req);
+    if (!res.ok) fail(res.error);
+    return;
+  }
+  void (async () => {
+    const cookies = acceptsCookies(req) ? await collectCookies(req) : undefined;
+    if (cookies) job.usedCookies = true;
+    const res = sendToCoApp(cookies && acceptsCookies(req) ? { ...req, cookies } : req);
+    if (!res.ok) fail(res.error);
+    else broadcastJobs();
+  })();
+}
+
+/** Вторая попытка с куками. Только по отказу, который лечится входом, только
+ *  когда тумблер включён, и только один раз: не помогло — значит дело не в
+ *  сессии, и гонять её по кругу незачем. */
+function retryWithCookies(job: JobInfo, message?: string): boolean {
+  if (!cookieSetting || job.cookiesTried) return false;
+  if (!looksLikeAuthFailure(message)) return false;
+  const req = jobRequests.get(job.jobId);
+  if (!req || !acceptsCookies(req)) return false;
+  job.cookiesTried = true;
+  for (const url of cookieUrlsFor(req)) {
+    const h = hostOf(url);
+    if (h) cookieHosts.add(h);
+  }
+  log('bg', `отказ по входу — повтор с куками ${job.jobId}: ${(message ?? '').slice(0, 120)}`);
+  job.state = job.noQueue ? 'starting' : 'queued';
+  job.message = undefined;
+  job.progress = null;
+  if (job.noQueue) dispatchJob(job, req);
+  else pump();
+  persist();
+  broadcastJobs();
+  return true;
+}
+
 function enqueueJob(job: JobInfo, req: CoAppRequest): void {
   log('bg', `queued ${job.jobId} ${job.label}${job.noQueue ? ' (мимо очереди)' : ''}`);
   jobs.set(job.jobId, job);
   jobRequests.set(job.jobId, req);
   if (job.noQueue) {
     job.state = 'starting';
-    const res = sendToCoApp(req);
-    if (!res.ok) {
-      job.state = 'error';
-      job.message = res.error;
-    }
+    dispatchJob(job, req);
     persist();
     broadcastJobs();
     return;
@@ -625,6 +738,9 @@ function getCoAppPort(): chrome.runtime.Port {
       job.speedBps = undefined;
     }
     if (msg.outFile) job.outFile = msg.outFile;
+    // Отказали по входу — пробуем ещё раз, уже с куками. Сайт запоминаем,
+    // чтобы в следующий раз не гонять человека через лишнюю неудачу
+    if (msg.state === 'error' && retryWithCookies(job, msg.message)) return;
     if (msg.state === 'done' || msg.state === 'error' || msg.state === 'canceled') {
       job.finishedAt = Date.now();
       jobRequests.delete(msg.jobId);

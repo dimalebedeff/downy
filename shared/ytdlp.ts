@@ -185,6 +185,8 @@ export interface YtdlpDownloadOptions {
   resumePath?: string;
   /** Скачать только отрезок: yt-dlp --download-sections */
   cut?: CutRange;
+  /** Путь к файлу кук в формате Netscape. Пишет и стирает его хост */
+  cookieFile?: string;
 }
 
 export interface YtdlpDownloadEvents {
@@ -304,6 +306,7 @@ export function createYtdlpEngine(o: { binDir: string; log?: Log }): YtdlpEngine
     // Отрезок: yt-dlp качает только нужную секцию (режет ffmpeg по ключевым
     // кадрам). Ютубу не предлагаем — его SABR-потоки ffmpeg не читает
     if (opts.cut) args.push('--download-sections', `*${opts.cut.fromSec ?? 0}-${opts.cut.toSec ?? 'inf'}`);
+    if (opts.cookieFile) args.push('--cookies', opts.cookieFile);
     args.push(opts.pageUrl);
 
     log('yt-dlp start', opts.pageUrl, 'streams:', streams, 'maxHeight:', opts.maxHeight ?? 'best');

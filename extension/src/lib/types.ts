@@ -51,6 +51,10 @@ export interface JobInfo {
   pausedBy?: 'user' | 'preempt' | 'dropped';
   /** Сколько раз очередь уже поднимала эту загрузку после обрыва */
   autoResumes?: number;
+  /** С этой загрузкой на сайт уехали куки — человек должен это видеть */
+  usedCookies?: boolean;
+  /** Отказ уже пробовали лечить куками: второй раз не помогут */
+  cookiesTried?: boolean;
   /** Мимо очереди (обложки): мелочь не должна ждать двухгиговое кино */
   noQueue?: boolean;
   bytes?: number;

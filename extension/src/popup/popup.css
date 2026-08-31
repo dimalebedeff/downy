@@ -313,6 +313,18 @@ ul { list-style: none; margin: 0; padding: 0; }
   text-overflow: ellipsis;
 }
 
+.cookie-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; cursor: pointer; }
+
+/* Риск называем рядом с тумблером, а не прячем в подсказку */
+.cookie-why {
+  margin: 4px 0 0 20px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.job-key { font-size: 11px; opacity: .75; cursor: default; }
+
 .card-actions { margin-top: auto; display: flex; align-items: center; gap: 6px; }
 
 /* Объяснение вместо кнопки: качать нечего, и надо сказать почему */
