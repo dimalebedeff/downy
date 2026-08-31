@@ -9,7 +9,6 @@ import { isProbablyVideo } from '../lib/media-detect';
 import { diffJobs } from '../lib/jobs-diff';
 import { isUnfinished, mergeVisibleOrder, pausedLabel } from '../lib/queue';
 import { unsupportedReason } from '../lib/unsupported';
-import { readThemeChoice, THEME_KEY, type ThemeChoice } from '../lib/theme';
 import { qualityOptions } from '../lib/ytdlp-formats';
 
 type MediaGroup = ReturnType<typeof groupMediaItems>[number];
@@ -1083,85 +1082,6 @@ function cookieFixBtn(): HTMLButtonElement {
   return b;
 }
 
-// ---------- Выбор темы ----------
-
-/** Значки рисуем сами: у системных эмодзи разная толщина и посадка, и в ряду
- *  они выглядят собранными из кусков. Одна сетка 16×16, один штрих. */
-const THEME_ICONS: Record<ThemeChoice, string> = {
-  light:
-    '<circle cx="8" cy="8" r="3.1"/><path d="M8 1.2v1.6M8 13.2v1.6M1.2 8h1.6M13.2 8h1.6' +
-    'M3.2 3.2l1.15 1.15M11.65 11.65l1.15 1.15M12.8 3.2l-1.15 1.15M4.35 11.65L3.2 12.8"/>',
-  dark: '<path d="M13.4 9.6A5.9 5.9 0 0 1 6.4 2.6a5.9 5.9 0 1 0 7 7z"/>',
-  system: '<rect x="1.8" y="2.8" width="12.4" height="8.4" rx="1.6"/><path d="M5.8 14h4.4"/>',
-};
-
-const THEME_LABELS: Record<ThemeChoice, { word: string; title: string }> = {
-  light: { word: 'Светлая', title: 'Светлая тема' },
-  dark: { word: 'Тёмная', title: 'Тёмная тема' },
-  system: { word: 'Авто', title: 'Как в системе' },
-};
-
-const THEME_ORDER: ThemeChoice[] = ['light', 'dark', 'system'];
-
-let themeChoice: ThemeChoice = 'system';
-
-/** Красит попап. «Как в системе» — это отсутствие метки: дальше решает CSS */
-function paintTheme(choice: ThemeChoice): void {
-  const root = document.documentElement;
-  if (choice === 'system') root.removeAttribute('data-theme');
-  else root.setAttribute('data-theme', choice);
-}
-
-/** Бегунок считаем по факту: у выбранной кнопки есть подпись, и она шире */
-function syncThemeSeg(seg: HTMLElement): void {
-  const knob = seg.querySelector<HTMLElement>('.seg-knob');
-  const active = seg.querySelector<HTMLElement>('button[aria-pressed="true"]');
-  if (!knob || !active) return;
-  knob.style.width = `${active.offsetWidth}px`;
-  knob.style.transform = `translateX(${active.offsetLeft - seg.clientLeft - 2}px)`;
-}
-
-function setTheme(seg: HTMLElement, choice: ThemeChoice, save = true): void {
-  themeChoice = choice;
-  paintTheme(choice);
-  for (const b of seg.querySelectorAll<HTMLButtonElement>('button[data-theme]')) {
-    b.setAttribute('aria-pressed', String(b.dataset.theme === choice));
-  }
-  syncThemeSeg(seg);
-  if (!save) return;
-  void chrome.storage.local.set({ [THEME_KEY]: choice });
-  try {
-    localStorage.setItem(THEME_KEY, choice);
-  } catch {
-    // приватный режим мог запретить — переживём, storage.local всё помнит
-  }
-}
-
-// Тема — самое первое дело: chrome.storage отвечает асинхронно, и попап успел
-// бы мигнуть системной. Быстрый ответ держим в localStorage, а правду — в
-// storage.local, откуда её читает и панель прицела на странице
-themeChoice = readThemeChoice(localStorage.getItem(THEME_KEY));
-paintTheme(themeChoice);
-
-function buildThemeSeg(): void {
-  const seg = $<HTMLSpanElement>('#theme-seg');
-  for (const choice of THEME_ORDER) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.dataset.theme = choice;
-    b.title = THEME_LABELS[choice].title;
-    b.setAttribute('aria-label', THEME_LABELS[choice].title);
-    b.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${THEME_ICONS[choice]}</svg>`;
-    const w = document.createElement('span');
-    w.className = 'w';
-    w.textContent = THEME_LABELS[choice].word;
-    b.append(w);
-    b.addEventListener('click', () => setTheme(seg, choice));
-    seg.append(b);
-  }
-  setTheme(seg, themeChoice, false);
-}
-
 function renderJobs(): void {
   hasActiveJobs = lastJobs.some((j) => j.state === 'running' || j.state === 'starting' || j.state === 'queued');
   syncUpdateBtn();
@@ -1297,15 +1217,6 @@ async function init(): Promise<void> {
   askDirBox.addEventListener('change', () => {
     void chrome.storage.local.set({ askDirEveryTime: askDirBox.checked });
   });
-
-  // Правда лежит в storage.local: localStorage мог не пережить чистку, да и
-  // панель на странице читает именно оттуда
-  const stored = readThemeChoice((await chrome.storage.local.get({ [THEME_KEY]: 'system' }))[THEME_KEY]);
-  if (stored !== themeChoice) {
-    themeChoice = stored;
-    paintTheme(stored);
-  }
-  buildThemeSeg();
 
   // Право на куки спрашиваем ровно в момент щелчка: пока тумблер выключен,
   // расширение и не может их прочитать — не «не читает», а не имеет права

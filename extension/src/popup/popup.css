@@ -39,11 +39,8 @@
   --menu-shadow: 0 8px 28px rgba(20, 20, 25, .16);
 }
 
-/* Тема выбирается вручную, поэтому состояний три. «Как в системе» — это
-   отсутствие метки на <html>: тогда решает медиазапрос. Явный выбор ставит
-   data-theme и должен побеждать систему в обе стороны, отсюда и :not() */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
+  :root {
     --bg: #131418;
     /* Карточки заметно светлее холста — контраст, а не серая каша */
     --card: #262a33;
@@ -58,25 +55,6 @@
     --menu-shadow: 0 8px 28px rgba(0, 0, 0, .5);
   }
 }
-
-:root[data-theme='dark'] {
-  --bg: #131418;
-  /* Карточки заметно светлее холста — контраст, а не серая каша */
-  --card: #262a33;
-  --fg: #f2f3f5;
-  --muted: #a3a9b4;
-  --border: #363b47;
-  --chip: #313642;
-  --accent-deep: #f5c518;
-  --ok: #f5c518;
-  --glow: rgba(245, 197, 24, .55);
-  --shadow: 0 1px 3px rgba(0, 0, 0, .35);
-  --menu-shadow: 0 8px 28px rgba(0, 0, 0, .5);
-}
-
-/* Нативные части — скроллбар, выпадающий список — тоже должны знать выбор */
-:root[data-theme='light'] { color-scheme: light; }
-:root[data-theme='dark'] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 
@@ -376,63 +354,6 @@ ul { list-style: none; margin: 0; padding: 0; }
 }
 
 .cookie-row { margin-top: 12px; font-size: 12.5px; font-weight: 600; }
-
-/* ---------- Выбор темы ---------- */
-
-.theme-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; }
-.theme-lab { flex: 1; min-width: 0; }
-
-/* Сегменты с бегунком: выбранное подсвечено тем же жёлтым, что и включённая
-   мишень в шапке. Бегунок едет и растягивается — у выбранного есть подпись */
-.seg {
-  position: relative;
-  display: inline-flex;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 2px;
-}
-
-.seg-knob {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: 2px;
-  background: var(--accent);
-  border-radius: 7px;
-  transition: transform .19s cubic-bezier(.4, 0, .2, 1), width .19s cubic-bezier(.4, 0, .2, 1);
-}
-
-.seg button {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 7px;
-  font: inherit;
-  font-size: 11.5px;
-  border: none;
-  background: none;
-  color: var(--muted);
-  border-radius: 7px;
-  white-space: nowrap;
-}
-
-.seg button svg { width: 15px; height: 15px; display: block; flex: none; }
-.seg button .w { display: none; }
-.seg button[aria-pressed='true'] { color: var(--accent-ink); }
-.seg button[aria-pressed='true'] .w { display: inline; font-weight: 600; }
-.seg button:hover:not([aria-pressed='true']) { color: var(--fg); }
-.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-/* Один штрих на все значки — оттого ряд и читается как один набор, а не как
-   три символа из разных системных шрифтов */
-.seg svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-
-@media (prefers-reduced-motion: reduce) {
-  .seg-knob { transition: none; }
-}
 
 /* Риск называем рядом с галкой, а не прячем в подсказку. Отступ ровно под
    текстом строки выше — 16 на галку и 7 на зазор */
