@@ -154,8 +154,12 @@ function cutRowOpen(): boolean {
   return mediaList.querySelector('.cut-row') != null;
 }
 
+/** Кебаб, которым открыто меню: по нему отличаем повторный клик от соседнего */
+let kebabAnchor: HTMLElement | null = null;
+
 function closeKebab(): void {
   kebabMenu.hidden = true;
+  kebabAnchor = null;
   // Убираем распорку, которой попап подрастал под меню
   document.body.style.minHeight = '';
 }
@@ -164,6 +168,14 @@ function openKebab(
   anchor: HTMLElement,
   actions: { label: string; run: () => void; disabled?: boolean; hint?: string }[],
 ): void {
+  // Повторный клик по той же кнопке закрывает меню. Глобальный обработчик
+  // клика мимо сюда не дотягивается: он нарочно пропускает клики по кебабу,
+  // иначе закрывал бы меню за миг до того, как кнопка его откроет
+  if (!kebabMenu.hidden && kebabAnchor === anchor) {
+    closeKebab();
+    return;
+  }
+  kebabAnchor = anchor;
   // Распорка прошлого меню не должна влиять на замеры нового
   document.body.style.minHeight = '';
   kebabMenu.textContent = '';
