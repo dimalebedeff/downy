@@ -167,7 +167,7 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 .version {
   display: inline-block;
@@ -180,6 +180,8 @@ h2 {
   display: flex;
   align-items: center;
   gap: 5px;
+  /* Относится к полю выше — стоит вплотную, чтобы это было видно без слов */
+  margin-top: 6px;
   color: var(--muted);
   font-size: 11px;
   cursor: pointer;
