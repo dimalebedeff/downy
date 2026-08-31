@@ -7,6 +7,7 @@
 import { backgroundImageUrl, bestFromSrcset, isPostLink, meetsPickThreshold } from './lib/pick';
 import { unsupportedReason } from './lib/unsupported';
 import { fmtEta, fmtSize, fmtSpeed } from './lib/progress';
+import { pausedLabel } from './lib/queue';
 import { typeIconSvg, type FileKind } from './lib/media-icon';
 
 interface DomMediaEntry {
@@ -889,6 +890,15 @@ async function send(t: PickTarget, opts: SendOpts = {}): Promise<void> {
     window.setTimeout(closeMenu, why ? 4200 : 1600);
     return;
   }
+  // Фон объясняет отказ словами — например, что пост у ролика не опознан и
+  // качать надо с его страницы. Раньше этот текст никто не читал, и клик
+  // просто ничего не делал: ни загрузки, ни причины
+  const error = res?.error as string | undefined;
+  if (!res?.ok && error) {
+    showNote(error);
+    window.setTimeout(hideNote, 6000);
+    return;
+  }
   // Галку ставим по факту загрузки, а не по успеху запроса: ответ «вариантов
   // нет» тоже приходит с ok, и рамка зеленела там, где ничего не качалось
   if (res?.ok && res.jobId) markTaken(sentUrl ?? t.postUrl);
@@ -1330,6 +1340,17 @@ function updateJob(job: PageJob): void {
     return;
   }
 
+  // Пауза — не финал: загрузка ждёт кнопку ▶ или поднимется сама после
+  // обрыва. Раньше она проваливалась в общую ветку и объявлялась ошибкой,
+  // а строка исчезала — человек видел смерть там, где всё живо
+  if (job.state === 'paused') {
+    row.spin.hidden = true;
+    row.state.className = 'p-state';
+    row.state.textContent = pausedLabel(job.pausedBy);
+    if (row.meta) row.meta.textContent = '';
+    return;
+  }
+
   // Готово или ошибка — дальше строка только доживает своё
   row.finished = true;
   row.spin.hidden = true;
@@ -1371,4 +1392,6 @@ interface PageJob {
   message?: string;
   /** Человеческое объяснение отказа — приезжает из фона вместе с ошибкой */
   hint?: string;
+  /** Кто остановил: рука человека, вытеснение очередью или обрыв связи */
+  pausedBy?: 'user' | 'preempt' | 'dropped';
 }
