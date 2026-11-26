@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { unsupportedReason } from '../src/lib/unsupported';
+import { siteNote, unsupportedReason } from '../src/lib/unsupported';
 
 describe('unsupportedReason', () => {
   it('мессенджеры с шифрованием объясняются каждый по-своему', () => {
     expect(unsupportedReason('https://web.whatsapp.com/')).toMatch(/шифрует/);
-    expect(unsupportedReason('https://web.telegram.org/k/#123')).toMatch(/мимо браузера/);
+  });
+
+  it('Telegram больше не «бессилен»: вместо отказа — как качать', () => {
+    expect(unsupportedReason('https://web.telegram.org/k/#123')).toBeNull();
+    expect(siteNote('https://web.telegram.org/a/#-100123')).toMatch(/прицелом/);
+    expect(siteNote('https://web.whatsapp.com/')).toMatch(/шифрует/);
+    expect(siteNote('https://youtube.com/watch?v=a')).toBeNull();
   });
 
   it('подписки с защитой контента', () => {

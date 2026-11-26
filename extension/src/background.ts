@@ -9,7 +9,8 @@ import {
   playlistDuration,
 } from './lib/m3u8';
 import { isLiveMpd, isProtectedMpd, looksLikeMpd, mpdDuration } from './lib/mpd';
-import { buildFilename, buildYtdlpStem } from './lib/filename';
+import { buildFilename, buildYtdlpStem, localDateStamp, sanitizeFilename } from './lib/filename';
+import { isTelegramMediaUrl, isTelegramWeb, telegramFileInfo, telegramStem } from './lib/telegram';
 import { isNewerVersion, REPO } from './lib/update';
 import { applyReorder, isUnfinished, nextToStart, normalizeOrder, probeRetryDelay } from './lib/queue';
 import { nextSpeed, type SpeedTrack } from './lib/speed';
@@ -27,6 +28,7 @@ import type {
   CutRange,
   DirectJobRequest,
   HlsJobRequest,
+  PageJobRequest,
   PongEvent,
   StreamSelection,
   YtdlpJobRequest,
@@ -99,8 +101,14 @@ function pump(): void {
     return;
   }
   // Недокачанный файл от паузы — продолжаем его, а не начинаем новый
-  if (job.outFile && (req.type === 'download_hls' || req.type === 'download_direct' || req.type === 'download_ytdlp')) {
-    (req as HlsJobRequest | DirectJobRequest | YtdlpJobRequest).resumePath = job.outFile;
+  if (
+    job.outFile &&
+    (req.type === 'download_hls' ||
+      req.type === 'download_direct' ||
+      req.type === 'download_ytdlp' ||
+      req.type === 'download_page')
+  ) {
+    (req as HlsJobRequest | DirectJobRequest | YtdlpJobRequest | PageJobRequest).resumePath = job.outFile;
   }
   // Подъём после обрыва считаем: пара попыток — это уснувший service worker,
   // а вот десяток подряд означает, что поднимать уже нечего
@@ -762,16 +770,23 @@ function getCoAppPort(): chrome.runtime.Port {
       }
       return;
     }
+    if (msg.type === 'page_ack') {
+      onPageAck(msg.jobId, msg.bytes);
+      return;
+    }
     if (msg.type !== 'job') return;
     const job = jobs.get(msg.jobId);
     if (!job) return;
+    // Загрузка встала — вкладке больше нечего читать
+    if (msg.state !== 'running') closePagePull(msg.jobId);
     if (msg.state !== job.state) {
       log('bg', `job ${msg.jobId} ${job.state} -> ${msg.state}${msg.message ? ` (${msg.message.slice(0, 200)})` : ''}`);
     }
     job.state = msg.state;
     // Пауза шлёт progress: null — не стираем позицию полоски
     if (msg.state !== 'paused' || msg.progress != null) job.progress = msg.progress;
-    job.message = msg.message;
+    job.message = msg.message ?? pageStallNote.get(msg.jobId);
+    pageStallNote.delete(msg.jobId);
     if (msg.bytes != null) job.bytes = msg.bytes;
     if (msg.totalBytes != null) job.totalBytes = msg.totalBytes;
     if (msg.state === 'running' && msg.bytes != null) {
@@ -807,6 +822,7 @@ function getCoAppPort(): chrome.runtime.Port {
     const err = chrome.runtime.lastError?.message;
     log('bg', `coapp отключился: ${err ?? '(без причины)'}`);
     coappPort = null;
+    for (const id of [...pagePulls.keys()]) closePagePull(id);
     if (updateInProgress) {
       updateInProgress = false;
       broadcastUpdateProgress('error', err ?? 'Downy на компьютере не отвечает');
@@ -1185,6 +1201,134 @@ function broadcastUpdateProgress(state: string, message?: string): void {
  * ютубе это 2160p: полчаса ожидания вместо пяти минут, причём чаще всего ради
  * ролика, который посмотрят один раз. Явный выбор в меню этот потолок снимает.
  */
+// ---------- Файлы из вкладки: Telegram Web ----------
+//
+// Адрес такого файла открывается только внутри вкладки, поэтому байты везёт
+// она: фон берёт у неё мегабайт, отдаёт помощнику, ждёт page_ack — и только
+// тогда просит следующий. Очередь, пауза, отмена и докачка — общие со всеми.
+
+const pagePulls = new Map<string, chrome.runtime.Port>();
+/** Почему встало — подпись к паузе, которую поставили не руками */
+const pageStallNote = new Map<string, string>();
+
+function closePagePull(jobId: string): void {
+  const port = pagePulls.get(jobId);
+  if (!port) return;
+  pagePulls.delete(jobId);
+  try {
+    port.disconnect();
+  } catch {
+    // вкладка уже закрылась
+  }
+}
+
+/** Встали не по вине человека: файл на диске, продолжит ▶ */
+function stallPageJob(jobId: string, why: string): void {
+  closePagePull(jobId);
+  const job = jobs.get(jobId);
+  if (!job || !isUnfinished(job.state)) return;
+  log('bg', `загрузка из вкладки встала ${jobId}: ${why}`);
+  if (job.noQueue) {
+    // Фото идёт мимо очереди, и ▶ его не поднимет. Весит оно сотни килобайт —
+    // докачивать нечего, проще кликнуть ещё раз
+    sendToCoApp({ type: 'page_end', jobId, error: 'Вкладка Telegram пропала — кликни по фото ещё раз' });
+    return;
+  }
+  pageStallNote.set(jobId, why);
+  job.pausedBy = 'user';
+  sendToCoApp({ type: 'pause', jobId });
+}
+
+/** Вкладка, которая прочитает файл: та, где кликнули, иначе любая с Telegram */
+async function pageTabFor(req: PageJobRequest): Promise<number | undefined> {
+  const own = await chrome.tabs.get(req.tabId).catch(() => undefined);
+  if (own?.id != null && isTelegramWeb(own.url)) return own.id;
+  // blob живёт только в своей странице — в чужой вкладке его нет
+  if (req.mediaUrl.startsWith('blob:')) return undefined;
+  const [any] = await chrome.tabs.query({ url: 'https://web.telegram.org/*' });
+  return any?.id;
+}
+
+function onPageAck(jobId: string, bytes: number): void {
+  const live = pagePulls.get(jobId);
+  if (live) {
+    live.postMessage({ cmd: 'next' });
+    return;
+  }
+  const req = jobRequests.get(jobId);
+  if (req?.type !== 'download_page') return;
+  void (async () => {
+    const tabId = await pageTabFor(req);
+    if (tabId == null) {
+      stallPageJob(jobId, 'Качать умеет только вкладка Telegram — открой её и нажми ▶');
+      return;
+    }
+    let port: chrome.runtime.Port;
+    try {
+      port = chrome.tabs.connect(tabId, { name: 'downy-page-read', frameId: 0 });
+    } catch {
+      stallPageJob(jobId, 'Вкладка Telegram не ответила — обнови её и нажми ▶');
+      return;
+    }
+    pagePulls.set(jobId, port);
+    port.onMessage.addListener(
+      (m: { offset?: number; data?: string; total?: number; done?: boolean; error?: string }) => {
+        if (pagePulls.get(jobId) !== port) return;
+        if (m.error) {
+          closePagePull(jobId);
+          sendToCoApp({ type: 'page_end', jobId, error: m.error });
+        } else if (m.done) {
+          closePagePull(jobId);
+          sendToCoApp({ type: 'page_end', jobId });
+        } else if (m.data != null && m.offset != null) {
+          const sent = sendToCoApp({ type: 'page_chunk', jobId, offset: m.offset, data: m.data, totalBytes: m.total });
+          if (!sent.ok) closePagePull(jobId);
+        }
+      },
+    );
+    port.onDisconnect.addListener(() => {
+      void chrome.runtime.lastError;
+      // Сами закрыли — его уже нет в карте. Иначе пропала вкладка
+      if (pagePulls.get(jobId) === port) {
+        stallPageJob(jobId, 'Вкладка Telegram закрылась или перезагрузилась — открой её и нажми ▶');
+      }
+    });
+    port.postMessage({ cmd: 'open', url: req.mediaUrl, offset: bytes });
+  })();
+}
+
+async function startPageJob(tabId: number, url: string, kind: 'image' | 'video'): Promise<StartJobResult> {
+  const dir = await resolveJobOutDir();
+  if (dir.canceled) return { ok: true };
+  if (dir.error) return { ok: false, error: dir.error };
+  const info = telegramFileInfo(url);
+  const { stem, ext } = telegramStem(info, kind);
+  const filename = `${sanitizeFilename(`${stem} [${localDateStamp(new Date())}]`)}.${ext}`;
+  const jobId = crypto.randomUUID();
+  const job: JobInfo = {
+    jobId,
+    label: filename,
+    state: 'queued',
+    progress: null,
+    totalBytes: info.size,
+    sourceUrl: url,
+    // Фото из канала весит сотни килобайт — не ждёт за часовым роликом
+    noQueue: kind === 'image' || undefined,
+    mediaKind: kind,
+  };
+  log('page', `взяли из вкладки Telegram ${kind} ${url.slice(0, 120)}`);
+  enqueueJob(job, {
+    type: 'download_page',
+    jobId,
+    filename,
+    outDir: dir.dir,
+    totalBytes: info.size,
+    mediaUrl: url,
+    tabId,
+  });
+  return { ok: true, jobId };
+}
+
 const PICKER_MAX_HEIGHT = 1080;
 
 interface PickVariant {
@@ -1315,6 +1459,17 @@ async function handlePick(
 ): Promise<{ ok: boolean; error?: string; variants?: PickVariant[]; probeHint?: string }> {
   const streams = msg.streams ?? 'both';
   const picked = msg.chosen === true || msg.variantUrl != null || msg.streams != null;
+
+  // Telegram: файл существует только во вкладке — её и просим его прочитать
+  if (msg.url && isTelegramMediaUrl(msg.url)) {
+    const res = await startPageJob(tabId, msg.url, msg.kind);
+    if (res.ok && res.jobId) trackPageJob(tabId, res.jobId);
+    return res;
+  }
+  if (isTelegramWeb(msg.pageUrl)) {
+    // Адреса нет — плеер ещё не начал грузить ролик, а yt-dlp тут бессилен
+    return { ok: false, error: 'Открой видео в Telegram, запусти его и кликни ещё раз' };
+  }
 
   if (msg.kind === 'image') {
     if (!msg.url) return { ok: false, error: 'У картинки нет адреса' };

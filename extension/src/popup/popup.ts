@@ -8,7 +8,7 @@ import { filterPageItems, groupMediaItems, samePage } from '../lib/media-group';
 import { isProbablyVideo } from '../lib/media-detect';
 import { diffJobs } from '../lib/jobs-diff';
 import { isUnfinished, mergeVisibleOrder, pausedLabel } from '../lib/queue';
-import { unsupportedReason } from '../lib/unsupported';
+import { siteNote } from '../lib/unsupported';
 import { classifyYtdlpError } from '../lib/ytdlp-errors';
 import { qualityOptions } from '../lib/ytdlp-formats';
 
@@ -364,7 +364,7 @@ function renderMedia(): void {
   emptyEl.hidden = groups.length > 0 || showPageCards;
   // Пустой экран без объяснения читается как «сломалось». Если площадка
   // из тех, где мы бессильны, — говорим об этом прямо, а не молчим
-  const why = activeTab?.url ? unsupportedReason(activeTab.url) : null;
+  const why = activeTab?.url ? siteNote(activeTab.url) : null;
   emptyWhyEl.textContent = why ?? '';
   emptyWhyEl.hidden = why == null;
   refreshDot();

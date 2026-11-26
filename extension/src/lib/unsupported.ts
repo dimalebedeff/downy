@@ -19,10 +19,6 @@ const RULES: Rule[] = [
     why: 'WhatsApp шифрует переписку целиком: файлы существуют только внутри вкладки, снаружи их не забрать',
   },
   {
-    host: /(^|\.)web\.telegram\.org$/,
-    why: 'Telegram Web качает медиа своим протоколом мимо браузера — перехватывать нечего',
-  },
-  {
     // Подписки с защитой контента: ключ выдаёт только их плеер
     host: /(^|\.)(netflix\.com|primevideo\.com|disneyplus\.com|hulu\.com|max\.com)$/,
     why: 'Кино под защитой: сегменты зашифрованы, а ключ сервис отдаёт только своему плееру',
@@ -36,6 +32,30 @@ const RULES: Rule[] = [
     why: 'Стриминг музыки отдаёт треки только своему плееру — забрать файл неоткуда',
   },
 ];
+
+/**
+ * Площадки, где качать можно, но только одним путём. Список в попапе там
+ * пуст по устройству сайта, и без подсказки человек решит, что Downy сломан.
+ */
+const HINTS: Rule[] = [
+  {
+    // Медиа живут только во вкладке: сеть их не видит, видит прицел
+    host: /(^|\.)web\.telegram\.org$/,
+    why: 'В Telegram качаем прицелом: открой фото или видео, нажми Alt+Shift+D и кликни по нему. Работает и в каналах, где сохранение закрыто',
+  },
+];
+
+/** Что сказать на пустом месте: почему нельзя или как можно. null — молчим. */
+export function siteNote(pageUrl: string): string | null {
+  const why = unsupportedReason(pageUrl);
+  if (why) return why;
+  try {
+    const host = new URL(pageUrl).hostname.toLowerCase();
+    return HINTS.find((r) => r.host.test(host))?.why ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Почему здесь ничего не выйдет. null — площадка обычная, работаем как всегда. */
 export function unsupportedReason(pageUrl: string): string | null {

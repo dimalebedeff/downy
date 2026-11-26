@@ -23,6 +23,9 @@ import type {
   DirectJobRequest,
   HlsJobRequest,
   JobEvent,
+  PageChunkRequest,
+  PageEndRequest,
+  PageJobRequest,
   PickDirRequest,
   ProbeMediaRequest,
   ProbeRequest,
@@ -571,6 +574,141 @@ async function startDirect(req: DirectJobRequest): Promise<void> {
   }
 }
 
+// ---------- Файлы из вкладки (Telegram Web) ----------
+//
+// Качает не хост, а вкладка: адрес существует только внутри неё. Хост держит
+// файл открытым и пишет то, что приносят, строго по порядку. Пауза и отмена
+// приходят обычными pause/cancel — расширение само перестаёт слать куски.
+
+interface PageWriter {
+  out: fs.WriteStream;
+  outFile: string;
+  bytes: number;
+  totalBytes?: number;
+  lastSent: number;
+  /** Пишем по одному: следующий кусок ждёт, пока ляжет предыдущий */
+  busy: Promise<void>;
+}
+
+const pageWriters = new Map<string, PageWriter>();
+
+function closeWriter(w: PageWriter): Promise<void> {
+  return new Promise((resolve) => w.out.end(() => resolve()));
+}
+
+function startPage(req: PageJobRequest): void {
+  let outFile: string;
+  let startBytes = 0;
+  try {
+    if (req.resumePath) {
+      outFile = req.resumePath;
+      try {
+        startBytes = fs.statSync(outFile).size;
+      } catch {
+        startBytes = 0;
+      }
+    } else {
+      outFile = uniquePath(resolveOutDir(req.outDir), req.filename);
+    }
+  } catch (e) {
+    emit({ type: 'job', jobId: req.jobId, state: 'error', progress: null, message: String(e) });
+    return;
+  }
+  const out = fs.createWriteStream(outFile, { flags: startBytes > 0 ? 'a' : 'w' });
+  const w: PageWriter = { out, outFile, bytes: startBytes, totalBytes: req.totalBytes, lastSent: 0, busy: Promise.resolve() };
+  pageWriters.set(req.jobId, w);
+  const job: RunningJob = {
+    canceled: false,
+    paused: false,
+    outFile,
+    kill: () => {
+      pageWriters.delete(req.jobId);
+      forgetJob(req.jobId);
+      void w.busy.then(() => closeWriter(w)).then(() => {
+        if (job.paused) {
+          log('page paused', req.jobId, w.bytes, 'bytes');
+          emit({ type: 'job', jobId: req.jobId, state: 'paused', progress: null, bytes: w.bytes, outFile });
+        } else {
+          fs.rm(outFile, { force: true }, () => {});
+          log('page canceled', req.jobId);
+          emit({ type: 'job', jobId: req.jobId, state: 'canceled', progress: null });
+        }
+      });
+    },
+  };
+  jobs.set(req.jobId, job);
+  out.on('error', (e) => pageFail(req.jobId, e.message));
+  log('page start', req.jobId, '->', outFile, startBytes ? `с ${startBytes}` : '');
+  emit({
+    type: 'job',
+    jobId: req.jobId,
+    state: 'running',
+    progress: w.totalBytes ? Math.min(0.999, startBytes / w.totalBytes) : null,
+    bytes: startBytes,
+    totalBytes: w.totalBytes,
+    outFile,
+  });
+  sendMessage({ type: 'page_ack', jobId: req.jobId, bytes: startBytes });
+}
+
+function pageFail(jobId: string, message: string): void {
+  const w = pageWriters.get(jobId);
+  if (!w) return;
+  pageWriters.delete(jobId);
+  forgetJob(jobId);
+  w.out.destroy();
+  fs.rm(w.outFile, { force: true }, () => {});
+  log('page error', jobId, message);
+  emit({ type: 'job', jobId, state: 'error', progress: null, message });
+}
+
+function pageChunk(req: PageChunkRequest): void {
+  const w = pageWriters.get(req.jobId);
+  if (!w) return; // отменили, пока кусок ехал
+  w.busy = w.busy.then(async () => {
+    if (!pageWriters.has(req.jobId)) return;
+    if (req.offset !== w.bytes) {
+      // Кусок не с того места: склеили бы файл с дырой или повтором
+      pageFail(req.jobId, `кусок с ${req.offset}, а записано ${w.bytes}`);
+      return;
+    }
+    const buf = Buffer.from(req.data, 'base64');
+    if (!w.out.write(buf)) await once(w.out, 'drain');
+    w.bytes += buf.length;
+    if (req.totalBytes) w.totalBytes = req.totalBytes;
+    sendMessage({ type: 'page_ack', jobId: req.jobId, bytes: w.bytes });
+    const now = Date.now();
+    if (now - w.lastSent >= 1000) {
+      w.lastSent = now;
+      emit({
+        type: 'job',
+        jobId: req.jobId,
+        state: 'running',
+        progress: w.totalBytes ? Math.min(0.999, w.bytes / w.totalBytes) : null,
+        bytes: w.bytes,
+        totalBytes: w.totalBytes,
+      });
+    }
+  });
+}
+
+function pageEnd(req: PageEndRequest): void {
+  const w = pageWriters.get(req.jobId);
+  if (!w) return;
+  if (req.error) {
+    void w.busy.then(() => pageFail(req.jobId, req.error!));
+    return;
+  }
+  void w.busy.then(async () => {
+    if (!pageWriters.has(req.jobId)) return;
+    pageWriters.delete(req.jobId);
+    forgetJob(req.jobId);
+    await closeWriter(w);
+    log('page done', req.jobId, w.bytes, 'bytes');
+    emit({ type: 'job', jobId: req.jobId, state: 'done', progress: 1, bytes: w.bytes, totalBytes: w.bytes, outFile: w.outFile });
+  });
+}
+
 function startYtdlp(req: YtdlpJobRequest): void {
   const handle = engine.download(
     {
@@ -996,7 +1134,8 @@ readMessages((raw) => {
   if (msg.type === 'log') {
     // Расширение пишет сюда же: цепочка «клик → фон → хост» одним файлом
     log(`[${msg.source}]`, msg.message);
-  } else if (msg.type !== 'ping') {
+  } else if (msg.type !== 'ping' && msg.type !== 'page_chunk') {
+    // Куски файла — мегабайт base64 каждый, в логе им не место
     // ping сыплется каждые пару секунд и не несёт ничего — в лог не пускаем
     log('recv', JSON.stringify(msg).slice(0, 300));
   }
@@ -1038,6 +1177,15 @@ readMessages((raw) => {
       break;
     case 'download_thumbnail':
       startThumbnail(msg);
+      break;
+    case 'download_page':
+      startPage(msg);
+      break;
+    case 'page_chunk':
+      pageChunk(msg);
+      break;
+    case 'page_end':
+      pageEnd(msg);
       break;
     case 'probe':
       probe(msg);

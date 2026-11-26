@@ -5,7 +5,8 @@
 // по сети, а прицел отдаёт такие ролики yt-dlp по адресу поста.
 
 import { backgroundImageUrl, bestFromSrcset, isPostLink, meetsPickThreshold } from './lib/pick';
-import { unsupportedReason } from './lib/unsupported';
+import { siteNote } from './lib/unsupported';
+import { isTelegramWeb } from './lib/telegram';
 import { fmtEta, fmtSize, fmtSpeed } from './lib/progress';
 import { pausedLabel } from './lib/queue';
 import { typeIconSvg, type FileKind } from './lib/media-icon';
@@ -20,6 +21,8 @@ let sentPageThumb: string | undefined;
 // Что уже сообщили про MSE-видео: какой пост и было ли превью
 let sentMse: { key: string; hasThumb: boolean } | null = null;
 let mseHref = location.href; // SPA меняет ролик без перезагрузки — начинаем сначала
+/** Telegram Web: его фото и ролики живут по blob- и stream-адресам вкладки */
+const ON_TELEGRAM = isTelegramWeb(location.href);
 
 function absUrl(raw: string): string | null {
   try {
@@ -420,7 +423,10 @@ function bestImageUrl(img: HTMLImageElement): string | undefined {
   if (href && IMAGE_FILE.test(href)) return absUrl(href) ?? undefined;
 
   const best = bestFromSrcset(img.srcset);
-  return absUrl(best || img.currentSrc || img.src) ?? undefined;
+  const raw = best || img.currentSrc || img.src;
+  // В Telegram картинка — это blob вкладки: адреса в сети у неё нет вовсе
+  if (ON_TELEGRAM && raw.startsWith('blob:')) return raw;
+  return absUrl(raw) ?? undefined;
 }
 
 /** Картинка, нарисованная фоном: никакого <img> в DOM нет */
@@ -431,6 +437,8 @@ function backgroundUrl(el: Element): string | undefined {
 
 function videoTarget(v: HTMLVideoElement): PickTarget {
   const src = v.currentSrc || v.src || '';
+  // Telegram кладёт в blob готовый файл, а не MSE-поток — его можно прочитать
+  if (ON_TELEGRAM && src.startsWith('blob:')) return { el: v, kind: 'video', url: src };
   const direct = src.startsWith('blob:') ? null : absUrl(src);
   if (direct) return { el: v, kind: 'video', url: direct };
   // MSE: потока с адресом не существует, зато есть страница поста. В ленте
@@ -915,7 +923,7 @@ function setPicker(on: boolean): void {
     // На таких площадках прицел просто не найдёт медиа и выключится по клику,
     // как будто сломался. Предупреждаем сразу, а не оставляем тыкать впустую
     if (TOP_FRAME) {
-      const why = unsupportedReason(location.href);
+      const why = siteNote(location.href);
       if (why) showNote(why);
     }
   } else {
@@ -1076,6 +1084,56 @@ chrome.runtime.onMessage.addListener(
     }
   },
 );
+
+// ---------- Telegram: файл читает вкладка, а не помощник ----------
+//
+// Фон открывает порт и просит кусок за куском. Сами байты достаёт tg-main —
+// он живёт в мире страницы, где плеер Telegram читает свои потоки. Мы только
+// переводим кусок в base64: сообщения расширения возят JSON, а не байты.
+
+function toBase64(buf: ArrayBuffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).slice(String(fr.result).indexOf(',') + 1));
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(new Blob([buf]));
+  });
+}
+
+if (ON_TELEGRAM && TOP_FRAME) {
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name !== 'downy-page-read') return;
+    const id = crypto.randomUUID();
+    let open = true;
+    const toMain = (cmd: string, extra: Record<string, unknown> = {}): void =>
+      window.postMessage({ __downy: 'tg-req', id, cmd, ...extra }, location.origin);
+    const onMain = (e: MessageEvent): void => {
+      if (e.source !== window) return;
+      const m = e.data as { __downy?: string; id?: string; piece?: ArrayBuffer; offset?: number; total?: number; done?: boolean; error?: string };
+      if (m?.__downy !== 'tg-res' || m.id !== id) return;
+      if (m.piece) {
+        void toBase64(m.piece).then(
+          (data) => open && port.postMessage({ offset: m.offset, data, total: m.total }),
+          () => open && port.postMessage({ error: 'Не вышло упаковать кусок файла' }),
+        );
+      } else if (m.done) {
+        port.postMessage({ done: true, total: m.total });
+      } else if (m.error) {
+        port.postMessage({ error: m.error });
+      }
+    };
+    window.addEventListener('message', onMain);
+    port.onMessage.addListener((m: { cmd?: string; url?: string; offset?: number }) => {
+      if (m.cmd === 'open') toMain('open', { url: m.url, offset: m.offset });
+      else if (m.cmd === 'next') toMain('next');
+    });
+    port.onDisconnect.addListener(() => {
+      open = false;
+      window.removeEventListener('message', onMain);
+      toMain('close');
+    });
+  });
+}
 
 // ---------- Панель Downy: что происходит с загрузками, начатыми со страницы ----------
 //

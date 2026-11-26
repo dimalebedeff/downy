@@ -11,6 +11,8 @@ await build({
   entryPoints: {
     background: ext('src/background.ts'),
     content: ext('src/content.ts'),
+    // Мир страницы Telegram Web: читает файлы, которые видит только вкладка
+    'tg-main': ext('src/tg-main.ts'),
     popup: ext('src/popup/popup.ts'),
   },
   bundle: true,

@@ -95,6 +95,44 @@ export interface YtdlpJobRequest {
   cookies?: string;
 }
 
+/**
+ * Файл, который умеет читать только вкладка (Telegram Web: поток плеера через
+ * его service worker). Хост открывает файл и ждёт куски: каждый приезжает
+ * отдельным page_chunk, на каждый хост отвечает page_ack. Без подтверждения
+ * следующий кусок не шлём — иначе гигабайт ролика встал бы в память фона.
+ */
+export interface PageJobRequest {
+  type: 'download_page';
+  jobId: string;
+  /** Имя файла с расширением, уже безопасное для файловой системы */
+  filename: string;
+  outDir?: string;
+  /** Резюм: дописываем этот файл с его текущего размера */
+  resumePath?: string;
+  /** Полный размер, если адрес его знает */
+  totalBytes?: number;
+  /** Для фона, хосту не нужны: откуда читать и в какой вкладке */
+  mediaUrl: string;
+  tabId: number;
+}
+
+export interface PageChunkRequest {
+  type: 'page_chunk';
+  jobId: string;
+  /** С какого байта кусок — хост сверяет со своим счётом */
+  offset: number;
+  /** Сами байты в base64: Native Messaging возит только JSON */
+  data: string;
+  totalBytes?: number;
+}
+
+/** Вкладка дочитала файл (или сдалась — тогда error) */
+export interface PageEndRequest {
+  type: 'page_end';
+  jobId: string;
+  error?: string;
+}
+
 /** Скачать только обложку страницы (yt-dlp --write-thumbnail, конверт в jpg) */
 export interface ThumbnailJobRequest {
   type: 'download_thumbnail';
@@ -221,6 +259,9 @@ export type CoAppRequest =
   | DirectJobRequest
   | YtdlpJobRequest
   | ThumbnailJobRequest
+  | PageJobRequest
+  | PageChunkRequest
+  | PageEndRequest
   | ProbeRequest
   | CancelRequest
   | PauseRequest
@@ -296,6 +337,13 @@ export interface ProbeMediaEvent {
   results: ProbedMedia[];
 }
 
+/** Кусок записан (или файл открыт) — давай следующий с этого байта */
+export interface PageAckEvent {
+  type: 'page_ack';
+  jobId: string;
+  bytes: number;
+}
+
 export type CoAppEvent =
   | PongEvent
   | JobEvent
@@ -304,4 +352,5 @@ export type CoAppEvent =
   | HeartbeatEvent
   | UpdateEvent
   | ProbeEvent
-  | ProbeMediaEvent;
+  | ProbeMediaEvent
+  | PageAckEvent;
