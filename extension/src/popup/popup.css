@@ -155,7 +155,9 @@ h2 {
 .settings-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  /* «Связь» стоит рядом с версией, а не улетает в правый край */
+  gap: 14px;
   margin-top: 12px;
 }
 .version {
